@@ -74,12 +74,13 @@ export default function CuadrillasPage() {
 
   return (
     <div style={{ padding: '20px', maxWidth: 1400, margin: '0 auto' }}>
+      {/* Primera fila: Título y botón de nueva cuadrilla */}
       <div
         style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          marginBottom: 30,
+          marginBottom: 20,
           flexWrap: 'wrap',
           gap: 15,
         }}
@@ -103,15 +104,25 @@ export default function CuadrillasPage() {
         </a>
       </div>
 
-      <div style={{ marginBottom: 25 }}>
+      {/* Segunda fila: Campo de búsqueda y otras opciones futuras */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-start',
+          alignItems: 'center',
+          marginBottom: 25,
+          flexWrap: 'wrap',
+          gap: 15,
+        }}
+      >
         <input
           type="text"
-          placeholder="🔍 Buscar por nombre, supervisor, zona o región..."
+          placeholder="🔍 Buscar cuadrillas..."
           value={q}
           onChange={(e) => setQ(e.target.value)}
           style={{
-            width: '100%',
-            maxWidth: 460,
+            minWidth: 280,
+            maxWidth: 350,
             padding: '12px 15px',
             border: '2px solid #dee2e6',
             borderRadius: 8,
@@ -119,6 +130,17 @@ export default function CuadrillasPage() {
             boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
           }}
         />
+        
+        {/* Espacio para futuras opciones como filtros, etc. */}
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: 10,
+          color: '#6c757d',
+          fontSize: 14 
+        }}>
+          📊 {rows.length} cuadrilla{rows.length !== 1 ? 's' : ''} {q ? 'encontrada' + (rows.length !== 1 ? 's' : '') : 'total' + (rows.length !== 1 ? 'es' : '')}
+        </div>
       </div>
 
       {loading && (

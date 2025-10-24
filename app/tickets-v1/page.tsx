@@ -19,6 +19,7 @@ type TicketV1 = {
   platform_affected: string | null;
   attention_type: string | null;
   service_affected: string | null;
+  estado: string | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -43,6 +44,7 @@ export default function TicketsV1Page() {
     'platform_affected',
     'attention_type',
     'service_affected',
+    'estado',
     'created_at',
     'updated_at',
   ].join(',');
@@ -67,6 +69,7 @@ export default function TicketsV1Page() {
           `platform_affected.ilike.%${term}%`,
           `attention_type.ilike.%${term}%`,
           `service_affected.ilike.%${term}%`,
+          `estado.ilike.%${term}%`,
         ].join(',')
       );
     }
@@ -105,6 +108,142 @@ export default function TicketsV1Page() {
     }
   };
 
+  const getEstadoStyle = (estado: string | null) => {
+    if (!estado) {
+      return {
+        backgroundColor: '#f5f5f5',
+        color: '#666',
+        borderLeft: '3px solid #ccc'
+      };
+    }
+
+    const estadoLower = estado.toLowerCase().trim();
+    
+    // Cada estado tiene un color único y diferenciado
+    switch (estadoLower) {
+      // EN EJECUCIÓN - Verde (único verde del sistema)
+      case 'en ejecución':
+      case 'en ejecucion':
+        return {
+          backgroundColor: '#e8f5e8',
+          color: '#2e7d32',
+          borderLeft: '3px solid #4caf50'
+        };
+      
+      // ASIGNADO - Azul
+      case 'asignado':
+        return {
+          backgroundColor: '#e3f2fd',
+          color: '#1565c0',
+          borderLeft: '3px solid #2196f3'
+        };
+      
+      // EN ESPERA - Amarillo/Ámbar
+      case 'en espera':
+        return {
+          backgroundColor: '#fff8e1',
+          color: '#f57c00',
+          borderLeft: '3px solid #ff9800'
+        };
+      
+      // EN RUTA - Púrpura
+      case 'en ruta':
+        return {
+          backgroundColor: '#f3e5f5',
+          color: '#7b1fa2',
+          borderLeft: '3px solid #9c27b0'
+        };
+      
+      // NEUTRALIZADO - Teal/Cian
+      case 'neutralizado':
+        return {
+          backgroundColor: '#e0f2f1',
+          color: '#00695c',
+          borderLeft: '3px solid #26a69a'
+        };
+      
+      // VALIDADO - Índigo
+      case 'validado':
+        return {
+          backgroundColor: '#e8eaf6',
+          color: '#283593',
+          borderLeft: '3px solid #3f51b5'
+        };
+      
+      // NUEVO - Naranja
+      case 'nuevo':
+        return {
+          backgroundColor: '#fff3e0',
+          color: '#e65100',
+          borderLeft: '3px solid #ff6f00'
+        };
+      
+      // Otros estados con colores únicos
+      case 'completado':
+      case 'resuelto':
+      case 'finalizado':
+        return {
+          backgroundColor: '#e8f5e8', // Verde (mismo que EN EJECUCIÓN)
+          color: '#2e7d32',
+          borderLeft: '3px solid #4caf50'
+        };
+      
+      case 'cancelado':
+      case 'anulado':
+        return {
+          backgroundColor: '#f3f4f6',
+          color: '#374151',
+          borderLeft: '3px solid #6b7280'
+        };
+      
+      case 'pendiente':
+        return {
+          backgroundColor: '#fef7cd',
+          color: '#a16207',
+          borderLeft: '3px solid #eab308'
+        };
+      
+      case 'urgente':
+      case 'crítico':
+        return {
+          backgroundColor: '#ffebee',
+          color: '#c62828',
+          borderLeft: '3px solid #f44336'
+        };
+      
+      case 'revisión':
+      case 'revision':
+        return {
+          backgroundColor: '#f0f4f8',
+          color: '#475569',
+          borderLeft: '3px solid #64748b'
+        };
+      
+      case 'bloqueado':
+        return {
+          backgroundColor: '#fef2f2',
+          color: '#dc2626',
+          borderLeft: '3px solid #ef4444'
+        };
+      
+      case 'en progreso':
+      case 'progreso':
+        return {
+          backgroundColor: '#dbeafe',
+          color: '#1d4ed8',
+          borderLeft: '3px solid #3b82f6'
+        };
+      
+      default:
+        // Estado por defecto - Azul claro (diferente a ASIGNADO)
+        return {
+          backgroundColor: '#f0f9ff',
+          color: '#0369a1',
+          borderLeft: '3px solid #0ea5e9'
+        };
+    }
+  };
+
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
       <div
@@ -117,7 +256,7 @@ export default function TicketsV1Page() {
           gap: '10px',
         }}
       >
-        <h2 style={{ margin: 0, color: '#007bff' }}>Tickets V1 📋</h2>
+        <h2 style={{ margin: 0, color: '#007bff' }}>Tickets 📋</h2>
 
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <Link
@@ -151,7 +290,7 @@ export default function TicketsV1Page() {
       <div style={{ marginBottom: '20px' }}>
         <input
           type="text"
-          placeholder="Buscar por ticket (folio), site, nivel, categoría, plataforma…"
+          placeholder="Buscar por ticket (folio), site, nivel, categoría, plataforma, estado…"
           value={qText}
           onChange={(e) => {
             setPage(1);
@@ -226,6 +365,9 @@ export default function TicketsV1Page() {
                     Subcategoría
                   </th>
                   <th style={{ padding: '15px', textAlign: 'left', fontWeight: 'bold' }}>
+                    Estado
+                  </th>
+                  <th style={{ padding: '15px', textAlign: 'left', fontWeight: 'bold' }}>
                     Creado
                   </th>
                   <th style={{ padding: '15px', textAlign: 'center', fontWeight: 'bold' }}>
@@ -252,6 +394,22 @@ export default function TicketsV1Page() {
                     <td style={{ padding: '12px' }}>{t.fault_level ?? '-'}</td>
                     <td style={{ padding: '12px' }}>{t.task_category ?? '-'}</td>
                     <td style={{ padding: '12px' }}>{t.task_subcategory ?? '-'}</td>
+                    <td style={{ padding: '12px' }}>
+                      <span style={{ 
+                        padding: '6px 12px', 
+                        borderRadius: '6px',
+                        fontSize: '11px',
+                        fontWeight: 'bold',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px',
+                        display: 'inline-block',
+                        minWidth: '80px',
+                        textAlign: 'center',
+                        ...getEstadoStyle(t.estado)
+                      }}>
+                        {t.estado ?? 'Sin estado'}
+                      </span>
+                    </td>
                     <td style={{ padding: '12px', color: '#666' }}>
                       {formatDateTime(t.created_at)}
                     </td>

@@ -91,7 +91,7 @@ export default function SitesV1Page() {
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: 20 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2 style={{ margin: 0, color: '#28a745' }}>📡 Sites V1 - Nueva Gestión</h2>
+        <h2 style={{ margin: 0, color: '#28a745' }}>📡 Sites</h2>
 
         <Link
           href="/sites-v1/new"

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from './context/AuthContext';
+import { USUARIO_ACTUAL } from '@/lib/auth';
 
 // ==== Tipos auxiliares de datos que vienen de Supabase ====
 type FaultLevelRow = { fault_level: string | null };
@@ -12,9 +14,17 @@ type EstadoRow = { estado: string | null };
 // ==== Tipos para estado/UI ====
 type OpcionSite = { id: string; nombre: string };
 type DatoTemporal = { fecha: string; cantidad: number; fechaFormateada: string };
+type DatoMensual = { 
+  mesAno: string; 
+  cantidad: number; 
+  fechaFormateada: string; 
+  dias: DatoTemporal[];
+  expandido?: boolean;
+};
 type EstadisticaEstado = { estado: string; cantidad: number; porcentaje: number };
 
 export default function HomePage() {
+  const { USUARIO_ACTUAL, userData } = useAuth();
   const [total, setTotal] = useState<number>(0);
   const [cargando, setCargando] = useState<boolean>(false);
   const [fechaDesde, setFechaDesde] = useState<string>('');
@@ -31,7 +41,9 @@ export default function HomePage() {
   const [opcionesEstado, setOpcionesEstado] = useState<string[]>([]);
   const [ticketsFiltrados, setTicketsFiltrados] = useState<number>(0);
   const [datosTemporales, setDatosTemporales] = useState<DatoTemporal[]>([]);
+  const [datosMensuales, setDatosMensuales] = useState<DatoMensual[]>([]);
   const [estadisticasEstado, setEstadisticasEstado] = useState<EstadisticaEstado[]>([]);
+  const [mesesExpandidos, setMesesExpandidos] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     cargarOpciones();
@@ -115,11 +127,16 @@ export default function HomePage() {
 
   // Tipamos como `any` para no pelear con tipos internos de la lib
   function aplicarFiltros(query: any) {
-    if (fechaDesde) {
-      query = query.gte('fault_occur_time', fechaDesde);
-    }
-    if (fechaHasta) {
-      query = query.lte('fault_occur_time', `${fechaHasta} 23:59:59`);
+    if (fechaDesde || fechaHasta) {
+      // Si hay filtros de fecha, excluir registros sin fecha
+      query = query.not('fault_occur_time', 'is', null);
+      
+      if (fechaDesde) {
+        query = query.gte('fault_occur_time', fechaDesde);
+      }
+      if (fechaHasta) {
+        query = query.lte('fault_occur_time', `${fechaHasta} 23:59:59`);
+      }
     }
     if (filtroFaultLevel) {
       query = query.eq('fault_level', filtroFaultLevel);
@@ -147,22 +164,71 @@ export default function HomePage() {
 
       setTotal(totalGeneral ?? 0);
 
+      // Consulta para tickets filtrados (para gráfico temporal y conteo)
       let queryFiltrada: any = supabase
         .from('tickets_v1')
-        .select('fault_occur_time, fault_level, attention_type, site_id, site_name, estado')
-        .not('fault_occur_time', 'is', null)
-        .order('fault_occur_time', { ascending: true })
-        .limit(5000);
+        .select('fault_occur_time, fault_level, attention_type, site_id, site_name, estado');
 
+      queryFiltrada = queryFiltrada.order('fault_occur_time', { ascending: true, nullsLast: true }).limit(5000);
       queryFiltrada = aplicarFiltros(queryFiltrada);
       const { data: ticketsData } = await queryFiltrada;
 
-      setTicketsFiltrados(ticketsData?.length ?? 0);
+      console.log('Tickets filtrados obtenidos:', ticketsData?.length);
+      console.log('Filtros aplicados:', { fechaDesde, fechaHasta, filtroFaultLevel, filtroSite, filtroAttentionType, filtroEstado });
+
+      // Verificar si hay filtros aplicados
+      const hayFiltros = fechaDesde || fechaHasta || filtroFaultLevel || filtroSite || filtroAttentionType || filtroEstado;
+      
+      if (hayFiltros) {
+        setTicketsFiltrados(ticketsData?.length ?? 0);
+      } else {
+        setTicketsFiltrados(0); // Sin filtros = 0 tickets filtrados
+      }
+
+      // ----- Consulta para obtener estadísticas reales por estado usando RPC o agregación
+      // Primero intentamos obtener todos los estados únicos
+      const { data: estadosUnicos } = await supabase
+        .from('tickets_v1')
+        .select('estado')
+        .not('estado', 'is', null)
+        .limit(1000);
+
+      // Obtener conteos reales para cada estado usando consultas separadas
+      const estadosSet = new Set((estadosUnicos as any[])?.map(item => item.estado) || []);
+      const estadosArray = Array.from(estadosSet);
+      
+      const estadisticasPromises = estadosArray.map(async (estado) => {
+        const { count } = await supabase
+          .from('tickets_v1')
+          .select('*', { count: 'exact', head: true })
+          .eq('estado', estado);
+        return { estado, cantidad: count || 0 };
+      });
+
+      // También obtener registros sin estado
+      const { count: sinEstadoCount } = await supabase
+        .from('tickets_v1')
+        .select('*', { count: 'exact', head: true })
+        .is('estado', null);
+
+      const estadisticasReales = await Promise.all(estadisticasPromises);
+      if (sinEstadoCount && sinEstadoCount > 0) {
+        estadisticasReales.push({ estado: 'Sin estado', cantidad: sinEstadoCount });
+      }
+
+      console.log('Estadísticas reales obtenidas:', estadisticasReales);
+      console.log('Total general:', totalGeneral);
 
       if (ticketsData && ticketsData.length > 0) {
+        // Agrupar por día
         const datosAgrupados = (ticketsData as any[]).reduce(
           (acc: Record<string, number>, ticket) => {
-            const fecha: string = String(ticket.fault_occur_time ?? '').split('T')[0] || 'Sin fecha';
+            let fecha: string;
+            if (ticket.fault_occur_time && ticket.fault_occur_time.trim() !== '') {
+              fecha = String(ticket.fault_occur_time).split('T')[0];
+            } else {
+              fecha = 'Sin fecha registrada';
+            }
             acc[fecha] = (acc[fecha] ?? 0) + 1;
             return acc;
           },
@@ -173,34 +239,75 @@ export default function HomePage() {
           .map(([fecha, cantidad]) => ({
             fecha,
             cantidad: Number(cantidad),
-            fechaFormateada: new Date(fecha).toLocaleDateString('es-ES'),
+            fechaFormateada: fecha === 'Sin fecha registrada' ? fecha : new Date(fecha).toLocaleDateString('es-ES'),
           }))
-          .sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
+          .sort((a, b) => {
+            // Poner "Sin fecha registrada" al final
+            if (a.fecha === 'Sin fecha registrada') return 1;
+            if (b.fecha === 'Sin fecha registrada') return -1;
+            return new Date(a.fecha).getTime() - new Date(b.fecha).getTime();
+          });
 
         setDatosTemporales(datosFormateados);
 
-        // ----- Calcular estadísticas por estado
-        const estadosCounts = (ticketsData as any[]).reduce(
-          (acc: Record<string, number>, ticket) => {
-            const estado: string = String(ticket.estado ?? 'Sin estado');
-            acc[estado] = (acc[estado] ?? 0) + 1;
-            return acc;
-          },
-          {}
-        );
+        // Agrupar por mes-año
+        const datosMensualesAgrupados = datosFormateados.reduce((acc: Record<string, { cantidad: number; dias: DatoTemporal[] }>, dato) => {
+          if (dato.fecha === 'Sin fecha registrada') {
+            const mesAno = 'Sin fecha registrada';
+            if (!acc[mesAno]) {
+              acc[mesAno] = { cantidad: 0, dias: [] };
+            }
+            acc[mesAno].cantidad += dato.cantidad;
+            acc[mesAno].dias.push(dato);
+          } else {
+            const fechaObj = new Date(dato.fecha);
+            const mesAno = `${fechaObj.getFullYear()}-${String(fechaObj.getMonth() + 1).padStart(2, '0')}`;
+            
+            if (!acc[mesAno]) {
+              acc[mesAno] = { cantidad: 0, dias: [] };
+            }
+            acc[mesAno].cantidad += dato.cantidad;
+            acc[mesAno].dias.push(dato);
+          }
+          return acc;
+        }, {});
 
-        const totalTicketsFiltrados = ticketsData.length;
-        const estadisticasFormateadas: EstadisticaEstado[] = Object.entries(estadosCounts)
-          .map(([estado, cantidad]) => ({
+        const datosMensualesFormateados: DatoMensual[] = Object.entries(datosMensualesAgrupados)
+          .map(([mesAno, data]) => ({
+            mesAno,
+            cantidad: data.cantidad,
+            fechaFormateada: mesAno === 'Sin fecha registrada' ? mesAno : 
+              new Date(`${mesAno}-01`).toLocaleDateString('es-ES', { year: 'numeric', month: 'long' }),
+            dias: data.dias,
+          }))
+          .sort((a, b) => {
+            if (a.mesAno === 'Sin fecha registrada') return 1;
+            if (b.mesAno === 'Sin fecha registrada') return -1;
+            return a.mesAno.localeCompare(b.mesAno);
+          });
+
+        setDatosMensuales(datosMensualesFormateados);
+      } else {
+        setDatosTemporales([]);
+        setDatosMensuales([]);
+      }
+
+      // ----- Procesar las estadísticas reales obtenidas
+      if (estadisticasReales && estadisticasReales.length > 0) {
+        const totalTicketsReales = total || 5000;
+        console.log('Total tickets reales para cálculo:', totalTicketsReales);
+        
+        const estadisticasFormateadas: EstadisticaEstado[] = estadisticasReales
+          .map(({ estado, cantidad }) => ({
             estado,
             cantidad: Number(cantidad),
-            porcentaje: totalTicketsFiltrados > 0 ? (Number(cantidad) / totalTicketsFiltrados) * 100 : 0,
+            porcentaje: totalTicketsReales > 0 ? (Number(cantidad) / totalTicketsReales) * 100 : 0,
           }))
           .sort((a, b) => b.cantidad - a.cantidad); // Ordenar por cantidad descendente
 
+        console.log('Estadísticas formateadas:', estadisticasFormateadas);
         setEstadisticasEstado(estadisticasFormateadas);
       } else {
-        setDatosTemporales([]);
         setEstadisticasEstado([]);
       }
     } catch (error) {
@@ -222,9 +329,32 @@ export default function HomePage() {
     setFiltroEstado('');
   };
 
+  const toggleMesExpandido = (mesAno: string) => {
+    const nuevoSet = new Set(mesesExpandidos);
+    if (nuevoSet.has(mesAno)) {
+      nuevoSet.delete(mesAno);
+    } else {
+      nuevoSet.add(mesAno);
+    }
+    setMesesExpandidos(nuevoSet);
+  };
+
   return (
     <div style={{ padding: 20, maxWidth: 1400, margin: '0 auto' }}>
-      <h1>Dashboard Tickets</h1>
+      <div style={{ marginBottom: 24 }}>
+        <h1 style={{ margin: '0 0 8px 0' }}>Dashboard Tickets</h1>
+        <p style={{ 
+          margin: 0, 
+          color: '#64748b', 
+          fontSize: 14,
+          backgroundColor: '#f1f5f9',
+          padding: '8px 12px',
+          borderRadius: 6,
+          display: 'inline-block'
+        }}>
+          📊 Panel de control • Usuario activo: <strong>{USUARIO_ACTUAL}</strong>
+        </p>
+      </div>
 
       <div
         style={{
@@ -387,7 +517,9 @@ export default function HomePage() {
             backgroundColor: 'white',
           }}
         >
-          <div style={{ fontSize: 14, color: '#64748b', marginBottom: 8 }}>Tickets Filtrados</div>
+          <div style={{ fontSize: 14, color: '#64748b', marginBottom: 8 }}>
+            {(fechaDesde || fechaHasta || filtroFaultLevel || filtroSite || filtroAttentionType || filtroEstado) ? 'Tickets Filtrados' : 'Sin Filtros'}
+          </div>
           <div style={{ fontSize: 32, fontWeight: 'bold', color: '#2563eb' }}>
             {ticketsFiltrados.toLocaleString()}
           </div>
@@ -401,9 +533,11 @@ export default function HomePage() {
             backgroundColor: 'white',
           }}
         >
-          <div style={{ fontSize: 14, color: '#64748b', marginBottom: 8 }}>Porcentaje</div>
+          <div style={{ fontSize: 14, color: '#64748b', marginBottom: 8 }}>
+            {(fechaDesde || fechaHasta || filtroFaultLevel || filtroSite || filtroAttentionType || filtroEstado) ? 'Porcentaje Filtrado' : 'Sin Filtros Aplicados'}
+          </div>
           <div style={{ fontSize: 32, fontWeight: 'bold', color: '#16a34a' }}>
-            {total > 0 ? ((ticketsFiltrados / total) * 100).toFixed(1) : '0'}%
+            {(fechaDesde || fechaHasta || filtroFaultLevel || filtroSite || filtroAttentionType || filtroEstado) && total > 0 ? ((ticketsFiltrados / total) * 100).toFixed(1) + '%' : '0%'}
           </div>
         </div>
       </div>
@@ -444,28 +578,92 @@ export default function HomePage() {
         >
           <h3 style={{ margin: '0 0 16px 0' }}>Tickets por Fecha</h3>
           <div style={{ height: 400, overflow: 'auto' }}>
-            {datosTemporales.length > 0 ? (
+            {datosMensuales.length > 0 ? (
               <div>
-                <p>Mostrando {datosTemporales.length} fechas con tickets</p>
-                {datosTemporales.slice(0, 30).map((item, index) => (
-                  <div
-                    key={index}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      padding: '8px 0',
-                      borderBottom: '1px solid #f1f5f9',
-                    }}
-                  >
-                    <span>{item.fechaFormateada}</span>
-                    <span style={{ fontWeight: 'bold', color: '#2563eb' }}>{item.cantidad} tickets</span>
+                <p style={{ marginBottom: 16, color: '#64748b', fontSize: 14 }}>
+                  Mostrando {datosMensuales.length} meses con tickets (haz clic para ver detalle por días)
+                </p>
+                {datosMensuales.map((mes, index) => (
+                  <div key={index} style={{ marginBottom: 8 }}>
+                    {/* Fila del mes (clickeable) */}
+                    <div
+                      onClick={() => toggleMesExpandido(mes.mesAno)}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '12px 16px',
+                        backgroundColor: mesesExpandidos.has(mes.mesAno) ? '#f0f9ff' : '#f8fafc',
+                        borderRadius: 8,
+                        cursor: 'pointer',
+                        border: mesesExpandidos.has(mes.mesAno) ? '2px solid #0ea5e9' : '1px solid #e2e8f0',
+                        transition: 'all 0.2s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!mesesExpandidos.has(mes.mesAno)) {
+                          e.currentTarget.style.backgroundColor = '#f1f5f9';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!mesesExpandidos.has(mes.mesAno)) {
+                          e.currentTarget.style.backgroundColor = '#f8fafc';
+                        }
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <span style={{ 
+                          marginRight: 8, 
+                          fontSize: 16,
+                          transform: mesesExpandidos.has(mes.mesAno) ? 'rotate(90deg)' : 'rotate(0deg)',
+                          transition: 'transform 0.2s ease'
+                        }}>
+                          ▶
+                        </span>
+                        <span style={{ fontWeight: 500 }}>{mes.fechaFormateada}</span>
+                      </div>
+                      <span style={{ 
+                        fontWeight: 'bold', 
+                        color: '#2563eb',
+                        backgroundColor: 'white',
+                        padding: '4px 8px',
+                        borderRadius: 4,
+                        fontSize: 13
+                      }}>
+                        {mes.cantidad} tickets
+                      </span>
+                    </div>
+
+                    {/* Detalle por días (expandible) */}
+                    {mesesExpandidos.has(mes.mesAno) && (
+                      <div style={{ 
+                        marginTop: 8, 
+                        marginLeft: 24,
+                        padding: '12px 16px',
+                        backgroundColor: 'white',
+                        borderRadius: 8,
+                        border: '1px solid #e0f2fe'
+                      }}>
+                        {mes.dias.map((dia, diaIndex) => (
+                          <div
+                            key={diaIndex}
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              padding: '6px 0',
+                              borderBottom: diaIndex < mes.dias.length - 1 ? '1px solid #f0f9ff' : 'none',
+                              fontSize: 13
+                            }}
+                          >
+                            <span style={{ color: '#475569' }}>{dia.fechaFormateada}</span>
+                            <span style={{ fontWeight: 500, color: '#0369a1' }}>
+                              {dia.cantidad} tickets
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
-                {datosTemporales.length > 30 && (
-                  <p style={{ textAlign: 'center', color: '#64748b', marginTop: 16 }}>
-                    ... y {datosTemporales.length - 30} fechas mas
-                  </p>
-                )}
               </div>
             ) : (
               <p>No hay datos temporales para mostrar</p>
@@ -500,7 +698,7 @@ export default function HomePage() {
                     Estados: {estadisticasEstado.length}
                   </div>
                   <div style={{ color: '#64748b', fontSize: 12 }}>
-                    Total: {estadisticasEstado.reduce((sum, item) => sum + item.cantidad, 0).toLocaleString()}
+                    Total: {total.toLocaleString()}
                   </div>
                 </div>
 

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { USUARIO_ACTUAL } from '@/lib/auth';
 
 const DESCRIPCIONES = [
   'Alarmas en Gestor',
@@ -48,7 +49,8 @@ export default function NuevoTicketV1() {
     severidad: 'MEDIA',
     estado: 'NUEVO',
     detalle: '',
-    codigo_site: '',
+    site_id: '',
+    site_name: '',
     creado_por: ''
   });
 
@@ -65,11 +67,44 @@ export default function NuevoTicketV1() {
         setSiteOpts([]); 
         return; 
       }
-      const { data } = await supabase.from('sites')
-        .select('codigo,site,direccion')
-        .or(`codigo.ilike.%${siteQ}%,site.ilike.%${siteQ}%`)
-        .limit(10);
-      setSiteOpts(data || []);
+      
+      console.log('Buscando sites con:', siteQ);
+      
+      try {
+        console.log('Buscando sites con término:', siteQ);
+        
+        // Primero intentar búsqueda por 'site' solamente
+        const { data: searchData, error: searchError } = await supabase
+          .from('sites_v1')
+          .select('*')
+          .ilike('site', `%${siteQ}%`)
+          .limit(10);
+          
+        if (searchError) {
+          console.error('Error buscando por site:', searchError);
+          
+          // Si falla, intentar por 'codigo'
+          const { data: searchData2, error: searchError2 } = await supabase
+            .from('sites_v1')
+            .select('*')
+            .ilike('codigo', `%${siteQ}%`)
+            .limit(10);
+            
+          if (searchError2) {
+            console.error('Error buscando por codigo:', searchError2);
+            setSiteOpts([]);
+          } else {
+            console.log('Sites encontrados por codigo:', searchData2);
+            setSiteOpts(searchData2 || []);
+          }
+        } else {
+          console.log('Sites encontrados por site:', searchData);
+          setSiteOpts(searchData || []);
+        }
+      } catch (err) {
+        console.error('Error general en búsqueda:', err);
+        setSiteOpts([]);
+      }
     }, 300);
     return () => clearTimeout(id);
   }, [siteQ]);
@@ -105,8 +140,9 @@ export default function NuevoTicketV1() {
         severidad: formData.severidad,
         estado: formData.estado,
         detalle: formData.detalle || null,
-        codigo_site: formData.codigo_site || null,
-        creado_por: formData.creado_por || 'Sistema',
+        site_id: formData.site_id || null,
+        site_name: formData.site_name || null,
+        creado_por: USUARIO_ACTUAL() || 'Sistema',
         detectado_at: new Date().toISOString(),
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -183,8 +219,8 @@ export default function NuevoTicketV1() {
         boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
       }}>
         
-        {/* Información básica */}
-        <div style={{ marginBottom: '30px' }}>
+        {/* Información básica - OCULTA */}
+        {/* <div style={{ marginBottom: '30px' }}>
           <h3 style={{ color: '#007bff', borderBottom: '2px solid #007bff', paddingBottom: '8px' }}>
             Información Básica
           </h3>
@@ -230,7 +266,7 @@ export default function NuevoTicketV1() {
               />
             </div>
           </div>
-        </div>
+        </div> */}
 
         {/* Descripción del problema */}
         <div style={{ marginBottom: '30px' }}>
@@ -393,41 +429,60 @@ export default function NuevoTicketV1() {
                 borderTop: 'none',
                 maxHeight: '200px',
                 overflowY: 'auto',
-                backgroundColor: 'white'
+                backgroundColor: 'white',
+                borderRadius: '0 0 6px 6px'
               }}>
-                {siteOpts.map((s: any) => (
+                {siteOpts.map((s: any, index: number) => (
                   <div
-                    key={s.codigo}
+                    key={s.codigo || s.site || index}
                     style={{
                       padding: '10px',
                       cursor: 'pointer',
                       borderBottom: '1px solid #eee'
                     }}
                     onClick={() => {
-                      setFormData(prev => ({ ...prev, codigo_site: s.codigo }));
+                      setFormData(prev => ({ 
+                        ...prev, 
+                        site_id: s.codigo || '',
+                        site_name: s.site || ''
+                      }));
                       setSiteQ(`${s.codigo} - ${s.site}`);
                       setSiteOpts([]);
                     }}
                     onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f5f5'}
                     onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'white'}
                   >
-                    <strong>{s.codigo}</strong> – {s.site}
-                    {s.direccion && <div style={{ fontSize: '12px', color: '#666' }}>{s.direccion}</div>}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <div style={{ fontWeight: 'bold', color: '#007bff', fontSize: '14px' }}>
+                          Código: {s.codigo}
+                        </div>
+                        <div style={{ fontSize: '14px', color: '#333', marginTop: '4px', fontWeight: '500' }}>
+                          Site: {s.site}
+                        </div>
+                        {(s.address || s.direccion) && <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>{s.address || s.direccion}</div>}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#007bff', fontWeight: 'bold' }}>
+                        Seleccionar
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
 
-            {formData.codigo_site && (
+            {formData.site_id && formData.site_name && (
               <div style={{
                 marginTop: '10px',
-                padding: '10px',
+                padding: '12px',
                 backgroundColor: '#d4edda',
                 border: '1px solid #c3e6cb',
-                borderRadius: '4px',
+                borderRadius: '6px',
                 color: '#155724'
               }}>
-                <strong>Site seleccionado:</strong> {formData.codigo_site}
+                <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>Site seleccionado:</div>
+                <div style={{ marginBottom: '4px' }}><strong>Código:</strong> {formData.site_id}</div>
+                <div><strong>Site:</strong> {formData.site_name}</div>
               </div>
             )}
           </div>

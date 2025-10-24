@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import Link from 'next/link';
-import { fetchTicketsV1 } from '@/app/lib/tickets/fetcher';
+
 import type { TicketV1 } from '@/lib/tickets/types';
 
 const PAGE_SIZE = 10;

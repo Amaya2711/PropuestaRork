@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+
 export const TicketV1Schema = z.object({
   id: z.number(),
   ticket_source: z.string(),

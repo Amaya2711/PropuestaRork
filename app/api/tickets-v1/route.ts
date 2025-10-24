@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { TicketsOkSchema } from "@/app/lib/tickets/types";
+import { TicketsOkSchema } from "@/lib/tickets/types";
 
 export async function GET() {
   try {

@@ -45,6 +45,16 @@ type CuadrillaDB = {
   telefono: string | null;
 };
 
+type TicketDB = {
+  id: string;
+  ticket_source: string | null;
+  site_id: string | null;
+  site_name: string | null;
+  task_category: string | null;
+  estado: string | null;
+  created_at: string | null;
+};
+
 type Punto = {
   id: number | string;
   codigo: string;
@@ -52,7 +62,11 @@ type Punto = {
   region: string | null;
   latitud: number | null;
   longitud: number | null;
-  tipo: 'site' | 'cuadrilla';
+  tipo: 'site' | 'cuadrilla' | 'ticket';
+  // Campos adicionales para tickets
+  ticketId?: string;
+  estadoTicket?: string;
+  categoria?: string;
 };
 
 /* ===================== Util: paginación ===================== */
@@ -84,11 +98,20 @@ export default function ClientMap() {
   const [map, setMap] = useState<any>(null);
   const [sites, setSites] = useState<Punto[]>([]);
   const [cuadrillas, setCuadrillas] = useState<Punto[]>([]);
+  const [tickets, setTickets] = useState<Punto[]>([]);
   const [allPoints, setAllPoints] = useState<Punto[]>([]);
 
-  const [loading, setLoading] = useState(false);
-  const [showSites, setShowSites] = useState(true);
-  const [showCuadrillas, setShowCuadrillas] = useState(true);
+  const [loadingSites, setLoadingSites] = useState(false);
+  const [loadingCuadrillas, setLoadingCuadrillas] = useState(false);
+  const [loadingTickets, setLoadingTickets] = useState(false);
+  const [showSites, setShowSites] = useState(false);
+  const [showCuadrillas, setShowCuadrillas] = useState(false);
+  const [showTickets, setShowTickets] = useState(false);
+  
+  // Estados para saber si los datos han sido cargados
+  const [sitesLoaded, setSitesLoaded] = useState(false);
+  const [cuadrillasLoaded, setCuadrillasLoaded] = useState(false);
+  const [ticketsLoaded, setTicketsLoaded] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Punto[]>([]);
@@ -98,53 +121,177 @@ export default function ClientMap() {
   // Selector de región
   const [selectedRegion, setSelectedRegion] = useState<string>(''); // '' = todas
 
-  /* ---------- Carga de datos ---------- */
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        const sitesRaw = await fetchAll<SiteDB>(
+  /* ---------- Funciones de carga a demanda ---------- */
+  const loadSites = async () => {
+    if (sitesLoaded || loadingSites) return;
+    
+    setLoadingSites(true);
+    try {
+      const sitesRaw = await fetchAll<SiteDB>(
+        'sites_v1',
+        'id,codigo,site,region,latitud,longitud'
+      );
+
+      const sitesPoints: Punto[] = sitesRaw.map((s) => ({
+        id: s.id,
+        codigo: s.codigo,
+        nombre: s.site,
+        region: s.region,
+        latitud: s.latitud,
+        longitud: s.longitud,
+        tipo: 'site',
+      }));
+
+      setSites(sitesPoints);
+      setSitesLoaded(true);
+      updateAllPoints(sitesPoints, cuadrillas, tickets);
+    } catch (e) {
+      console.error('Error cargando sites:', e);
+    } finally {
+      setLoadingSites(false);
+    }
+  };
+
+  const loadCuadrillas = async () => {
+    if (cuadrillasLoaded || loadingCuadrillas) return;
+    
+    setLoadingCuadrillas(true);
+    try {
+      const cuadsRaw = await fetchAll<CuadrillaDB>(
+        'cuadrillas_v1',
+        'id,codigo,nombre,supervisor,zona,activo,latitud,longitud,telefono'
+      );
+
+      const cuadsPoints: Punto[] = cuadsRaw.map((c) => ({
+        id: c.id,
+        codigo: c.codigo,
+        nombre: c.nombre,
+        region: c.zona, // zona -> region
+        latitud: c.latitud,
+        longitud: c.longitud,
+        tipo: 'cuadrilla',
+      }));
+
+      setCuadrillas(cuadsPoints);
+      setCuadrillasLoaded(true);
+      updateAllPoints(sites, cuadsPoints, tickets);
+    } catch (e) {
+      console.error('Error cargando cuadrillas:', e);
+    } finally {
+      setLoadingCuadrillas(false);
+    }
+  };
+
+  const loadTickets = async () => {
+    if (ticketsLoaded || loadingTickets) return;
+    
+    setLoadingTickets(true);
+    try {
+      // Primero necesitamos los sites para las coordenadas
+      let sitesRaw: SiteDB[] = [];
+      if (!sitesLoaded) {
+        sitesRaw = await fetchAll<SiteDB>(
           'sites_v1',
           'id,codigo,site,region,latitud,longitud'
         );
-
-        const sitesPoints: Punto[] = sitesRaw.map((s) => ({
+      } else {
+        // Usar los sites ya cargados
+        sitesRaw = sites.map(s => ({
           id: s.id,
           codigo: s.codigo,
-          nombre: s.site,
+          site: s.nombre,
           region: s.region,
           latitud: s.latitud,
           longitud: s.longitud,
-          tipo: 'site',
-        }));
-
-        const cuadsRaw = await fetchAll<CuadrillaDB>(
-          'cuadrillas_v1',
-          'id,codigo,nombre,supervisor,zona,activo,latitud,longitud,telefono'
-        );
-
-        const cuadsPoints: Punto[] = cuadsRaw.map((c) => ({
-          id: c.id,
-          codigo: c.codigo,
-          nombre: c.nombre,
-          region: c.zona, // zona -> region
-          latitud: c.latitud,
-          longitud: c.longitud,
-          tipo: 'cuadrilla',
-        }));
-
-        setSites(sitesPoints);
-        setCuadrillas(cuadsPoints);
-        setAllPoints([...sitesPoints, ...cuadsPoints]);
-      } catch (e) {
-        console.error('Error cargando datos del mapa:', e);
-      } finally {
-        setLoading(false);
+        })) as SiteDB[];
       }
-    };
 
-    load();
-  }, []);
+      // No filtrar por región aquí - se hará en visibleTickets
+      console.log(`Cargando tickets para ${sitesRaw.length} sites disponibles`);
+
+      const ticketsRaw = await fetchAll<TicketDB>(
+        'tickets_v1',
+        'id,ticket_source,site_id,site_name,task_category,estado,created_at'
+      );
+
+      const ticketsPoints: Punto[] = [];
+      const ticketsBySite = new Map<string, TicketDB[]>();
+      
+      // Agrupar tickets por site_id
+      for (const ticket of ticketsRaw) {
+        if (ticket.site_id) {
+          if (!ticketsBySite.has(ticket.site_id)) {
+            ticketsBySite.set(ticket.site_id, []);
+          }
+          ticketsBySite.get(ticket.site_id)!.push(ticket);
+        }
+      }
+      
+      // Crear un punto por cada site que tenga tickets
+      for (const [siteId, ticketsForSite] of ticketsBySite.entries()) {
+        const siteMatch = sitesRaw.find(site => site.codigo === siteId);
+        
+        if (siteMatch && siteMatch.latitud && siteMatch.longitud) {
+          const ticketCount = ticketsForSite.length;
+          const estados = ticketsForSite.map(t => t.estado).filter(Boolean);
+          const categorias = [...new Set(ticketsForSite.map(t => t.task_category).filter(Boolean))];
+          
+          ticketsPoints.push({
+            id: `tickets-${siteId}`,
+            codigo: siteId,
+            nombre: `${ticketCount} Ticket${ticketCount > 1 ? 's' : ''}`,
+            region: siteMatch.region,
+            latitud: siteMatch.latitud,
+            longitud: siteMatch.longitud,
+            tipo: 'ticket',
+            ticketId: `${ticketCount} tickets`,
+            estadoTicket: estados.join(', '),
+            categoria: categorias.join(', '),
+          });
+          
+          // Debug: Verificar que los tickets tengan región
+          if (ticketCount > 0) {
+            console.log(`Ticket creado - Site: ${siteId}, Región: "${siteMatch.region}", Count: ${ticketCount}`);
+          }
+        }
+      }
+
+      setTickets(ticketsPoints);
+      setTicketsLoaded(true);
+      updateAllPoints(sites, cuadrillas, ticketsPoints);
+    } catch (e) {
+      console.error('Error cargando tickets:', e);
+    } finally {
+      setLoadingTickets(false);
+    }
+  };
+
+  // Función para actualizar allPoints
+  const updateAllPoints = (sitesData: Punto[], cuadrillasData: Punto[], ticketsData: Punto[]) => {
+    setAllPoints([...sitesData, ...cuadrillasData, ...ticketsData]);
+  };
+
+  // Funciones para manejar cambios de checkbox con carga automática
+  const handleSitesChange = (checked: boolean) => {
+    setShowSites(checked);
+    if (checked && !sitesLoaded) {
+      loadSites();
+    }
+  };
+
+  const handleCuadrillasChange = (checked: boolean) => {
+    setShowCuadrillas(checked);
+    if (checked && !cuadrillasLoaded) {
+      loadCuadrillas();
+    }
+  };
+
+  const handleTicketsChange = (checked: boolean) => {
+    setShowTickets(checked);
+    if (checked && !ticketsLoaded) {
+      loadTickets();
+    }
+  };
 
   /* ---------- Regiones únicas ---------- */
   const regions = useMemo(() => {
@@ -158,9 +305,62 @@ export default function ClientMap() {
 
   // ¿El punto pertenece a la región seleccionada?
   const matchesRegion = (p: Punto) => {
-    if (!selectedRegion) return true; // Todas
-    return (p.region ?? '').trim() === selectedRegion;
+    if (!selectedRegion) return true; // Todas las regiones
+    const puntoRegion = (p.region ?? '').trim();
+    const regionSeleccionada = selectedRegion.trim();
+    const matches = puntoRegion === regionSeleccionada;
+    
+    // Debug específico para tickets
+    if (p.tipo === 'ticket') {
+      console.log(`matchesRegion TICKET: "${puntoRegion}" === "${regionSeleccionada}" = ${matches} (ID: ${p.id})`);
+    }
+    
+    return matches;
   };
+
+  // Debug del filtrado de tickets por región
+  useEffect(() => {
+    if (ticketsLoaded && tickets.length > 0) {
+      console.log('=== DEBUG FILTRADO TICKETS ===');
+      console.log('Región seleccionada:', `"${selectedRegion}"`);
+      console.log('Total tickets cargados:', tickets.length);
+      
+      // Calcular directamente los tickets visibles para debug
+      const ticketsVisibles = selectedRegion ? tickets.filter(matchesRegion) : tickets;
+      console.log('Tickets visibles después del filtro:', ticketsVisibles.length);
+      
+      // Mostrar todas las regiones únicas en los tickets
+      const regionesEnTickets = [...new Set(tickets.map(t => t.region))].sort();
+      console.log('Regiones únicas en tickets:', regionesEnTickets);
+      
+      // Contar tickets por región
+      const contadorRegiones = {};
+      tickets.forEach(t => {
+        const region = t.region || 'Sin región';
+        contadorRegiones[region] = (contadorRegiones[region] || 0) + 1;
+      });
+      console.log('Tickets por región:', contadorRegiones);
+      
+      if (selectedRegion) {
+        console.log(`\n--- Filtrado detallado para región "${selectedRegion}" ---`);
+        
+        tickets.forEach(ticket => {
+          const puntoRegion = (ticket.region ?? '').trim();
+          const regionSeleccionada = selectedRegion.trim();
+          const coincide = puntoRegion === regionSeleccionada;
+          
+          console.log(`Ticket ${ticket.codigo}: región="${puntoRegion}" vs seleccionada="${regionSeleccionada}" => ${coincide}`);
+        });
+        
+        const ticketsDeRegion = tickets.filter(t => (t.region ?? '').trim() === selectedRegion.trim());
+        console.log(`\nRESULTADO: ${ticketsDeRegion.length} tickets coinciden con región "${selectedRegion}"`);
+        
+        if (ticketsDeRegion.length > 0) {
+          console.log('IDs de tickets que coinciden:', ticketsDeRegion.map(t => t.codigo));
+        }
+      }
+    }
+  }, [selectedRegion, tickets]);
 
   /* ---------- Búsqueda ---------- */
   useEffect(() => {
@@ -202,9 +402,10 @@ export default function ClientMap() {
     () => ({
       sites: sites.length,
       cuads: cuadrillas.length,
+      tickets: tickets.length,
       total: allPoints.length,
     }),
-    [sites, cuadrillas, allPoints]
+    [sites, cuadrillas, tickets, allPoints]
   );
 
   // Colecciones filtradas por región (para mapa y contadores visibles)
@@ -216,7 +417,12 @@ export default function ClientMap() {
     () => (selectedRegion ? cuadrillas.filter(matchesRegion) : cuadrillas),
     [cuadrillas, selectedRegion]
   );
-  const visibleTotal = visibleSites.length + visibleCuadrillas.length;
+  const visibleTickets = useMemo(() => {
+    const result = selectedRegion ? tickets.filter(matchesRegion) : tickets;
+    console.log(`visibleTickets useMemo: ${result.length} tickets visible (región: "${selectedRegion || 'TODAS'}")`);
+    return result;
+  }, [tickets, selectedRegion]);
+  const visibleTotal = visibleSites.length + visibleCuadrillas.length + visibleTickets.length;
 
   return (
     <div style={{ height: 'calc(100vh - 80px)' }}>
@@ -369,32 +575,49 @@ export default function ClientMap() {
             gap: 15,
           }}
         >
-          {/* Checkboxes */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
+          {/* Checkboxes con carga automática */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 15, flexWrap: 'wrap' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <input
                 type="checkbox"
                 checked={showSites}
-                onChange={(e) => setShowSites(e.target.checked)}
+                onChange={(e) => handleSitesChange(e.target.checked)}
               />
-              <span style={{ color: '#28a745', fontWeight: 600, fontSize: 13 }}>📡 Sites</span>
+              <span style={{ color: '#28a745', fontWeight: 600, fontSize: 13 }}>
+                📡 Sites {loadingSites ? '⏳' : ''}
+              </span>
             </label>
+            
             <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <input
                 type="checkbox"
                 checked={showCuadrillas}
-                onChange={(e) => setShowCuadrillas(e.target.checked)}
+                onChange={(e) => handleCuadrillasChange(e.target.checked)}
               />
-              <span style={{ color: '#6f42c1', fontWeight: 600, fontSize: 13 }}>👥 Cuadrillas</span>
+              <span style={{ color: '#6f42c1', fontWeight: 600, fontSize: 13 }}>
+                👥 Cuadrillas {loadingCuadrillas ? '⏳' : ''}
+              </span>
+            </label>
+            
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={showTickets}
+                onChange={(e) => handleTicketsChange(e.target.checked)}
+              />
+              <span style={{ color: '#dc3545', fontWeight: 600, fontSize: 13 }}>
+                🎫 Tickets {loadingTickets ? '⏳' : ''}
+              </span>
             </label>
           </div>
 
           {/* Contador de elementos */}
           <div style={{ flex: '1 1 auto', textAlign: 'center' }}>
-            <span style={{ color: loading ? '#007bff' : '#333', fontWeight: 500, fontSize: 13 }}>
-              {loading
-                ? '⏳ Cargando...'
-                : `📡 Sites: ${visibleSites.length}/${totals.sites} | 👥 Cuadrillas: ${visibleCuadrillas.length}/${totals.cuads} | 🔗 Total: ${visibleTotal}/${totals.total}`}
+            <span style={{ color: '#333', fontWeight: 500, fontSize: 13 }}>
+              📡 Sites: {sitesLoaded ? `${visibleSites.length}/${totals.sites}` : loadingSites ? '⏳' : 'No cargado'} | 
+              👥 Cuadrillas: {cuadrillasLoaded ? `${visibleCuadrillas.length}/${totals.cuads}` : loadingCuadrillas ? '⏳' : 'No cargado'} | 
+              🎫 Tickets: {ticketsLoaded ? `${visibleTickets.length}/${totals.tickets}` : loadingTickets ? '⏳' : 'No cargado'} | 
+              🔗 Total: {visibleTotal}/{totals.total}
             </span>
           </div>
 
@@ -505,6 +728,43 @@ export default function ClientMap() {
                   Zona: {c.region}
                   <br />
                   {c.latitud}, {c.longitud}
+                </Popup>
+              </CircleMarker>
+            );
+          })}
+
+        {/* Tickets */}
+        {showTickets &&
+          visibleTickets.map((t) => {
+            if (!t.latitud || !t.longitud) return null;
+            const isSelected =
+              selectedPoint?.id === t.id && selectedPoint.tipo === 'ticket';
+            return (
+              <CircleMarker
+                key={t.id}
+                center={[t.latitud, t.longitud]}
+                radius={isSelected ? 12 : 6}
+                pathOptions={{
+                  color: isSelected ? '#ff0000' : '#dc3545',
+                  fillColor: isSelected ? '#ffff00' : '#dc3545',
+                  weight: isSelected ? 3 : 2,
+                }}
+                eventHandlers={{ click: () => centerMapOnPoint(t) }}
+              >
+                <Popup>
+                  <b>🎫 TICKETS</b>
+                  <br />
+                  Cantidad: {t.ticketId}
+                  <br />
+                  Site: {t.codigo}
+                  <br />
+                  Estados: {t.estadoTicket}
+                  <br />
+                  Categorías: {t.categoria}
+                  <br />
+                  Región: {t.region}
+                  <br />
+                  {t.latitud}, {t.longitud}
                 </Popup>
               </CircleMarker>
             );

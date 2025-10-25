@@ -41,24 +41,70 @@ export default function NuevoTicketV1() {
   const [cuadrillas, setCuadrillas] = useState<any[]>([]);
   const [siteQ, setSiteQ] = useState('');
   const [siteOpts, setSiteOpts] = useState<any[]>([]);
+  const [tiposAtencion, setTiposAtencion] = useState<any[]>([]);
+  const [plataformasAfectadas, setPlataformasAfectadas] = useState<any[]>([]);
+  const [serviciosAfectados, setServiciosAfectados] = useState<any[]>([]);
   
   const [formData, setFormData] = useState({
-    folio: '',
-    descripcion: '',
-    tipo_falla: '',
-    severidad: 'MEDIA',
+    ticket_source: '',
+    task_category: '',
+    task_subcategory: '',
+    fault_level: 'MEDIA',
     estado: 'NUEVO',
-    detalle: '',
+    platform_affected: '',
+    attention_type: '',
+    service_affected: '',
     site_id: '',
     site_name: '',
-    creado_por: ''
+    created_by: ''
   });
 
   useEffect(() => {
     // Cargar cuadrillas activas
     supabase.from('cuadrillas').select('id,codigo,nombre').eq('activo', true)
       .then(({ data }) => setCuadrillas(data || []));
+    
+    // Cargar tipos de atención desde catalogo_tipo_atencion
+    supabase.from('catalogo_tipo_atencion').select('id,nombre').eq('activo', true)
+      .then(({ data }) => setTiposAtencion(data || []));
+    
+    // Cargar plataformas afectadas - probando diferentes nombres de tabla
+    supabase.from('catalogo_pla_afectada').select('*')
+      .then(({ data, error }) => {
+        if (error) {
+          console.log('Error con catalogo_pla_afectada (minúsculas):', error);
+          // Probar con el nombre original
+          return supabase.from('catalogo_pla_Afectada').select('*');
+        }
+        console.log('Plataformas afectadas data (minúsculas):', data);
+        setPlataformasAfectadas(data || []);
+        return { data, error: null };
+      })
+      .then(({ data, error }) => {
+        if (error) {
+          console.log('Error con catalogo_pla_Afectada:', error);
+        } else if (data) {
+          console.log('Plataformas afectadas data (mixtas):', data);
+          setPlataformasAfectadas(data || []);
+        }
+      });
+
+    // Cargar servicios afectados
+    console.log('Intentando cargar servicios afectados...');
+    supabase.from('catalogo_serv_afectado').select('*')
+      .then(({ data, error }) => {
+        console.log('Resultado servicios afectados:', { data, error });
+        if (!error && data) {
+          setServiciosAfectados(data);
+          console.log('Servicios cargados exitosamente:', data.length);
+        }
+      });
   }, []);
+
+  // Debug para verificar los datos cargados
+  useEffect(() => {
+    console.log('Estado plataformasAfectadas:', plataformasAfectadas);
+  }, [plataformasAfectadas]);
 
   // Búsqueda de sites
   useEffect(() => {
@@ -124,26 +170,25 @@ export default function NuevoTicketV1() {
 
     try {
       // Validaciones básicas
-      if (!formData.descripcion || !formData.tipo_falla) {
-        setMensaje('Los campos Descripción y Tipo de Falla son obligatorios');
+      if (!formData.task_category || !formData.task_subcategory) {
+        setMensaje('Los campos Categoría de Tarea y Subcategoría son obligatorios');
         setLoading(false);
         return;
       }
 
-      // Generar folio automático si no se proporciona
-      const folio = formData.folio || `TKT-${Date.now()}`;
-
       const ticketData = {
-        folio: folio,
-        descripcion: formData.descripcion,
-        tipo_falla: formData.tipo_falla,
-        severidad: formData.severidad,
+        ticket_source: formData.ticket_source || null,
+        task_category: formData.task_category || null,
+        task_subcategory: formData.task_subcategory || null,
+        fault_level: formData.fault_level,
         estado: formData.estado,
-        detalle: formData.detalle || null,
+        platform_affected: formData.platform_affected || null,
+        attention_type: formData.attention_type || null,
+        service_affected: formData.service_affected || null,
         site_id: formData.site_id || null,
         site_name: formData.site_name || null,
-        creado_por: USUARIO_ACTUAL() || 'Sistema',
-        detectado_at: new Date().toISOString(),
+        created_by: USUARIO_ACTUAL() || 'Sistema',
+        fault_occur_time: new Date().toISOString(),
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
@@ -219,23 +264,23 @@ export default function NuevoTicketV1() {
         boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
       }}>
         
-        {/* Información básica - OCULTA */}
-        {/* <div style={{ marginBottom: '30px' }}>
+        {/* Información básica */}
+        <div style={{ marginBottom: '30px' }}>
           <h3 style={{ color: '#007bff', borderBottom: '2px solid #007bff', paddingBottom: '8px' }}>
             Información Básica
           </h3>
           
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '20px' }}>
+          <div style={{ marginTop: '20px' }}>
             <div>
               <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-                Folio (opcional)
+                Ticket
               </label>
               <input
                 type="text"
-                name="folio"
-                value={formData.folio}
+                name="ticket_source"
+                value={formData.ticket_source}
                 onChange={handleInputChange}
-                placeholder="Se genera automáticamente si no se especifica"
+                placeholder="Ingrese información del ticket"
                 style={{
                   width: '100%',
                   padding: '10px',
@@ -246,27 +291,9 @@ export default function NuevoTicketV1() {
               />
             </div>
 
-            <div>
-              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-                Creado por
-              </label>
-              <input
-                type="text"
-                name="creado_por"
-                value={formData.creado_por}
-                onChange={handleInputChange}
-                placeholder="Nombre del usuario"
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  border: '2px solid #dee2e6',
-                  borderRadius: '6px',
-                  fontSize: '14px'
-                }}
-              />
-            </div>
+            {/* Campo "Creado por" oculto - se llena automáticamente */}
           </div>
-        </div> */}
+        </div>
 
         {/* Descripción del problema */}
         <div style={{ marginBottom: '30px' }}>
@@ -277,11 +304,11 @@ export default function NuevoTicketV1() {
           <div style={{ marginTop: '20px' }}>
             <div style={{ marginBottom: '20px' }}>
               <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-                Descripción *
+                Categoría de Tarea *
               </label>
               <select
-                name="descripcion"
-                value={formData.descripcion}
+                name="task_category"
+                value={formData.task_category}
                 onChange={handleInputChange}
                 required
                 style={{
@@ -301,11 +328,11 @@ export default function NuevoTicketV1() {
 
             <div style={{ marginBottom: '20px' }}>
               <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-                Tipo de Falla *
+                Subcategoría de Tarea *
               </label>
               <select
-                name="tipo_falla"
-                value={formData.tipo_falla}
+                name="task_subcategory"
+                value={formData.task_subcategory}
                 onChange={handleInputChange}
                 required
                 style={{
@@ -325,23 +352,27 @@ export default function NuevoTicketV1() {
 
             <div>
               <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-                Detalle adicional
+                Plataforma Afectada
               </label>
-              <textarea
-                name="detalle"
-                value={formData.detalle}
+              <select
+                name="platform_affected"
+                value={formData.platform_affected}
                 onChange={handleInputChange}
-                rows={4}
-                placeholder="Descripción detallada del problema..."
                 style={{
                   width: '100%',
                   padding: '10px',
                   border: '2px solid #dee2e6',
                   borderRadius: '6px',
-                  fontSize: '14px',
-                  resize: 'vertical'
+                  fontSize: '14px'
                 }}
-              />
+              >
+                <option value="">Seleccionar plataforma afectada</option>
+                {plataformasAfectadas.map((plataforma) => (
+                  <option key={plataforma.id} value={plataforma.nombre}>
+                    {plataforma.nombre}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
         </div>
@@ -355,11 +386,11 @@ export default function NuevoTicketV1() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '20px' }}>
             <div>
               <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-                Severidad
+                Nivel de Falla
               </label>
               <select
-                name="severidad"
-                value={formData.severidad}
+                name="fault_level"
+                value={formData.fault_level}
                 onChange={handleInputChange}
                 style={{
                   width: '100%',
@@ -393,6 +424,58 @@ export default function NuevoTicketV1() {
               >
                 {ESTADOS.map(e => (
                   <option key={e} value={e}>{e}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '20px' }}>
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                Tipo de Atención
+              </label>
+              <select
+                name="attention_type"
+                value={formData.attention_type}
+                onChange={handleInputChange}
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  border: '2px solid #dee2e6',
+                  borderRadius: '6px',
+                  fontSize: '14px'
+                }}
+              >
+                <option value="">Seleccionar tipo de atención</option>
+                {tiposAtencion.map((tipo) => (
+                  <option key={tipo.id} value={tipo.nombre}>
+                    {tipo.nombre}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                Servicio Afectado
+              </label>
+              <select
+                name="service_affected"
+                value={formData.service_affected}
+                onChange={handleInputChange}
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  border: '2px solid #dee2e6',
+                  borderRadius: '6px',
+                  fontSize: '14px'
+                }}
+              >
+                <option value="">Seleccionar servicio afectado</option>
+                {serviciosAfectados.map((servicio) => (
+                  <option key={servicio.id} value={servicio.nombre}>
+                    {servicio.nombre}
+                  </option>
                 ))}
               </select>
             </div>

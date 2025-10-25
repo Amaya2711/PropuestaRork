@@ -114,7 +114,7 @@ export default function EditarTicketV1({ params }: { params: { id: string } }) {
         estado: ticket.estado,
         detalle: ticket.detalle,
         codigo_site: ticket.codigo_site || null,
-        creado_por: ticket.creado_por,
+        created_by: ticket.created_by,
         updated_at: new Date().toISOString(),
         // Actualizar resuelto_at si el estado cambia a RESUELTO o CERRADO
         resuelto_at: (ticket.estado === 'RESUELTO' || ticket.estado === 'CERRADO') 
@@ -255,8 +255,8 @@ export default function EditarTicketV1({ params }: { params: { id: string } }) {
               </label>
               <input
                 type="text"
-                name="creado_por"
-                value={ticket.creado_por || ''}
+                name="created_by"
+                value={ticket.created_by || ''}
                 onChange={handleInputChange}
                 style={{
                   width: '100%',

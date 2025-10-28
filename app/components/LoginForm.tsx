@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Image from 'next/image';
 import { useAuth } from '../context/AuthContext';
 
 export default function LoginForm() {
@@ -68,16 +69,24 @@ export default function LoginForm() {
           <div style={{
             width: '80px',
             height: '80px',
-            backgroundColor: '#007bff',
+            backgroundColor: 'white',
             borderRadius: '50%',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             margin: '0 auto 20px',
-            fontSize: '36px',
-            color: 'white'
+            padding: '8px',
+            border: '3px solid #007bff'
           }}>
-            🔐
+            <Image
+              src="/logo.png"
+              alt="CJ Telecom Logo"
+              width={60}
+              height={60}
+              style={{ 
+                objectFit: 'contain'
+              }}
+            />
           </div>
           <h1 style={{
             margin: '0 0 8px 0',
@@ -85,7 +94,7 @@ export default function LoginForm() {
             fontWeight: 'bold',
             color: '#1a202c'
           }}>
-            Sistema Rork
+            CJ INSIGHT
           </h1>
           <p style={{
             margin: 0,
@@ -223,27 +232,7 @@ export default function LoginForm() {
           </button>
         </form>
 
-        {/* Usuarios de prueba (solo para desarrollo) */}
-        <div style={{
-          textAlign: 'center',
-          marginTop: '30px',
-          paddingTop: '20px',
-          borderTop: '1px solid #e2e8f0'
-        }}>
-          <p style={{
-            margin: '0 0 10px 0',
-            fontSize: '12px',
-            color: '#64748b',
-            fontWeight: 'bold'
-          }}>
-            Usuarios de prueba:
-          </p>
-          <div style={{ fontSize: '11px', color: '#64748b' }}>
-            <div>admin / admin123</div>
-            <div>jperez / pass123</div>
-            <div>mlopez / maria456</div>
-          </div>
-        </div>
+
       </div>
 
       {/* CSS para animación */}

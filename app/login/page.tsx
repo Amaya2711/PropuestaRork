@@ -68,7 +68,7 @@ export default function LoginPage() {
       }
 
       // Verificar que el empleado asociado está activo
-      if (usuarios.empleado && usuarios.empleado.estado_empleado !== 'ACTIVO') {
+      if (usuarios.empleado && Array.isArray(usuarios.empleado) ? usuarios.empleado[0]?.estado_empleado !== 'ACTIVO' : (usuarios.empleado as any)?.estado_empleado !== 'ACTIVO') {
         setMensaje('Su cuenta está inactiva. Contacte al administrador');
         setLoading(false);
         return;
@@ -89,7 +89,9 @@ export default function LoginPage() {
         id_usuario: usuarios.id_usuario,
         nombre_usuario: usuarios.nombre_usuario,
         id_empleado: usuarios.id_empleado,
-        nombre_empleado: usuarios.empleado?.nombre_empleado || '',
+        nombre_empleado: Array.isArray(usuarios.empleado) 
+          ? (usuarios.empleado[0] as any)?.nombre_empleado || '' 
+          : (usuarios.empleado as any)?.nombre_empleado || '',
         loginTime: new Date().toISOString()
       };
 

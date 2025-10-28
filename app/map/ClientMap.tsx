@@ -69,6 +69,92 @@ type Punto = {
   categoria?: string;
 };
 
+/* ===================== Componente de Popup Dinámico ===================== */
+interface DynamicTicketPopupProps {
+  siteCode: string;
+  siteName: string;
+  region: string;
+  latitud: number | null;
+  longitud: number | null;
+  selectedEstado: string;
+  selectedRegion: string;
+  getFilteredTicketInfo: (siteCode: string) => Promise<{ count: number; categorias: string[] }>;
+}
+
+const DynamicTicketPopup: React.FC<DynamicTicketPopupProps> = ({
+  siteCode,
+  siteName,
+  region,
+  latitud,
+  longitud,
+  selectedEstado,
+  selectedRegion,
+  getFilteredTicketInfo
+}) => {
+  const [ticketInfo, setTicketInfo] = useState<{ count: number; categorias: string[] } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadTicketInfo = async () => {
+      setLoading(true);
+      try {
+        const info = await getFilteredTicketInfo(siteCode);
+        setTicketInfo(info);
+      } catch (error) {
+        console.error('Error cargando info de tickets:', error);
+        setTicketInfo({ count: 0, categorias: [] });
+      }
+      setLoading(false);
+    };
+
+    loadTicketInfo();
+  }, [siteCode, selectedEstado, selectedRegion, getFilteredTicketInfo]);
+
+  if (loading) {
+    return <div><b>🎫 TICKETS</b><br />Cargando...</div>;
+  }
+
+  if (!ticketInfo) {
+    return <div><b>🎫 TICKETS</b><br />Error cargando datos</div>;
+  }
+
+  return (
+    <div>
+      <b>🎫 TICKETS</b>
+      <br />
+      Cantidad: {ticketInfo.count} ticket{ticketInfo.count !== 1 ? 's' : ''}
+      {selectedEstado && (
+        <>
+          <br />
+          Filtro: Estado = {selectedEstado}
+        </>
+      )}
+      {selectedRegion && (
+        <>
+          <br />
+          Filtro: Región = {selectedRegion}
+        </>
+      )}
+      <br />
+      Site: {siteCode}
+      {siteName && (
+        <>
+          <br />
+          Nombre: {siteName}
+        </>
+      )}
+      <br />
+      Categorías: {ticketInfo.categorias.length > 0 ? ticketInfo.categorias.join(', ') : 'N/A'}
+      <br />
+      Región: {region}
+      <br />
+      Latitud: {latitud}
+      <br />
+      Longitud: {longitud}
+    </div>
+  );
+};
+
 /* ===================== Util: paginación ===================== */
 const PAGE_SIZE = 1000;
 
@@ -120,6 +206,39 @@ export default function ClientMap() {
 
   // Selector de región
   const [selectedRegion, setSelectedRegion] = useState<string>(''); // '' = todas
+  const [selectedEstado, setSelectedEstado] = useState<string>(''); // '' = todos
+  
+  // Total real de tickets en la base de datos
+  const [totalTicketsDB, setTotalTicketsDB] = useState<number>(0);
+  // Total de tickets filtrados por estado
+  const [totalTicketsFiltrados, setTotalTicketsFiltrados] = useState<number>(0);
+
+  // Función para obtener información filtrada de tickets por site
+  const getFilteredTicketInfo = async (siteCode: string) => {
+    try {
+      let query = supabase
+        .from('tickets_v1')
+        .select('estado, task_category')
+        .eq('site_id', siteCode);
+      
+      // Aplicar filtro de estado si está seleccionado
+      if (selectedEstado) {
+        query = query.eq('estado', selectedEstado);
+      }
+      
+      const { data: filteredTickets, error } = await query;
+      
+      if (error || !filteredTickets) return { count: 0, categorias: [] };
+      
+      const count = filteredTickets.length;
+      const categorias = [...new Set(filteredTickets.map(t => t.task_category).filter(Boolean))];
+      
+      return { count, categorias };
+    } catch (error) {
+      console.error('Error obteniendo tickets filtrados:', error);
+      return { count: 0, categorias: [] };
+    }
+  };
 
   /* ---------- Funciones de carga a demanda ---------- */
   const loadSites = async () => {
@@ -271,6 +390,47 @@ export default function ClientMap() {
     setAllPoints([...sitesData, ...cuadrillasData, ...ticketsData]);
   };
 
+  // Función para cargar el total real de tickets de la base de datos
+  const loadTotalTickets = async () => {
+    try {
+      console.log('🔢 Cargando total de tickets de la base de datos...');
+      const { count, error } = await supabase
+        .from('tickets_v1')
+        .select('*', { count: 'exact', head: true });
+
+      if (error) {
+        console.error('Error obteniendo total de tickets:', error);
+        return;
+      }
+
+      setTotalTicketsDB(count || 0);
+      console.log('✅ Total de tickets en DB:', count);
+    } catch (error) {
+      console.error('Error cargando total de tickets:', error);
+    }
+  };
+
+  // Función para contar tickets reales filtrados por estado
+  const loadTicketsFiltradosPorEstado = async (estado: string) => {
+    try {
+      console.log('🔍 Contando tickets con estado:', estado);
+      const { count, error } = await supabase
+        .from('tickets_v1')
+        .select('*', { count: 'exact', head: true })
+        .eq('estado', estado);
+
+      if (error) {
+        console.error('Error contando tickets por estado:', error);
+        return;
+      }
+
+      setTotalTicketsFiltrados(count || 0);
+      console.log(`✅ Tickets con estado "${estado}":`, count);
+    } catch (error) {
+      console.error('Error contando tickets por estado:', error);
+    }
+  };
+
   // Funciones para manejar cambios de checkbox con carga automática
   const handleSitesChange = (checked: boolean) => {
     setShowSites(checked);
@@ -303,20 +463,88 @@ export default function ClientMap() {
     return Array.from(setR).sort((a, b) => a.localeCompare(b));
   }, [allPoints]);
 
-  // ¿El punto pertenece a la región seleccionada?
-  const matchesRegion = (p: Punto) => {
-    if (!selectedRegion) return true; // Todas las regiones
-    const puntoRegion = (p.region ?? '').trim();
-    const regionSeleccionada = selectedRegion.trim();
-    const matches = puntoRegion === regionSeleccionada;
+  /* ---------- Estados del catálogo ---------- */
+  const [estadosCatalogo, setEstadosCatalogo] = useState<any[]>([]);
+  
+  // Cargar estados desde catalogo_estados
+  useEffect(() => {
+    const loadEstados = async () => {
+      try {
+        console.log('🔄 Cargando estados desde catalogo_estados...');
+        const { data, error } = await supabase
+          .from('catalogo_estados')
+          .select('codigo, nombre, descripcion')
+          .eq('activo', true)
+          .order('codigo');
+        
+        if (!error && data) {
+          setEstadosCatalogo(data);
+          console.log('✅ Estados del catálogo cargados:', data.length, 'estados');
+          console.log('Estados disponibles:', data.map(e => `${e.codigo}-${e.nombre}`).join(', '));
+        } else {
+          console.log('⚠️ Error cargando estados del catálogo, usando fallback:', error?.message);
+          // Fallback con estados básicos si la tabla no existe
+          const fallbackEstados = [
+            { codigo: 7, nombre: 'NUEVO', descripcion: 'Ticket recién creado' },
+            { codigo: 8, nombre: 'RESUELTO', descripcion: 'Ticket completamente resuelto' }
+          ];
+          setEstadosCatalogo(fallbackEstados);
+          console.log('📝 Usando estados fallback:', fallbackEstados.map(e => e.nombre).join(', '));
+        }
+      } catch (err) {
+        console.error('❌ Error cargando estados:', err);
+        const fallbackEstados = [
+          { codigo: 7, nombre: 'NUEVO', descripcion: 'Ticket recién creado' },
+          { codigo: 8, nombre: 'RESUELTO', descripcion: 'Ticket completamente resuelto' }
+        ];
+        setEstadosCatalogo(fallbackEstados);
+      }
+    };
     
-    // Debug específico para tickets
-    if (p.tipo === 'ticket') {
-      console.log(`matchesRegion TICKET: "${puntoRegion}" === "${regionSeleccionada}" = ${matches} (ID: ${p.id})`);
+    loadEstados();
+    loadTotalTickets();
+  }, []);
+
+  // Cargar total de tickets filtrados cuando cambia el estado seleccionado
+  useEffect(() => {
+    if (selectedEstado) {
+      loadTicketsFiltradosPorEstado(selectedEstado);
+    } else {
+      // Si no hay estado seleccionado, usar el total general
+      setTotalTicketsFiltrados(totalTicketsDB);
+    }
+  }, [selectedEstado, totalTicketsDB]);
+
+  // Estados únicos para el selector (mantenemos compatibilidad)
+  const estados = useMemo(() => {
+    return estadosCatalogo.map(e => e.nombre).sort((a, b) => a.localeCompare(b));
+  }, [estadosCatalogo]);
+
+  // ¿El punto coincide con los filtros seleccionados?
+  const matchesFilters = (p: Punto) => {
+    // Filtro por región
+    if (selectedRegion) {
+      const puntoRegion = (p.region ?? '').trim();
+      const regionSeleccionada = selectedRegion.trim();
+      if (puntoRegion !== regionSeleccionada) {
+        return false;
+      }
     }
     
-    return matches;
+    // Filtro por estado (solo aplica a tickets)
+    if (selectedEstado && p.tipo === 'ticket') {
+      const estadosDelTicket = (p.estadoTicket ?? '').split(',').map(e => e.trim());
+      const estadoSeleccionado = selectedEstado.trim();
+      if (!estadosDelTicket.includes(estadoSeleccionado)) {
+        return false;
+      }
+    }
+    
+    return true;
   };
+
+  // Función legacy para mantener compatibilidad
+  const matchesRegion = matchesFilters;
 
   // Debug del filtrado de tickets por región
   useEffect(() => {
@@ -326,7 +554,7 @@ export default function ClientMap() {
       console.log('Total tickets cargados:', tickets.length);
       
       // Calcular directamente los tickets visibles para debug
-      const ticketsVisibles = selectedRegion ? tickets.filter(matchesRegion) : tickets;
+      const ticketsVisibles = (selectedRegion || selectedEstado) ? tickets.filter(matchesFilters) : tickets;
       console.log('Tickets visibles después del filtro:', ticketsVisibles.length);
       
       // Mostrar todas las regiones únicas en los tickets
@@ -334,7 +562,7 @@ export default function ClientMap() {
       console.log('Regiones únicas en tickets:', regionesEnTickets);
       
       // Contar tickets por región
-      const contadorRegiones = {};
+      const contadorRegiones: Record<string, number> = {};
       tickets.forEach(t => {
         const region = t.region || 'Sin región';
         contadorRegiones[region] = (contadorRegiones[region] || 0) + 1;
@@ -360,7 +588,7 @@ export default function ClientMap() {
         }
       }
     }
-  }, [selectedRegion, tickets]);
+  }, [selectedRegion, selectedEstado, tickets]);
 
   /* ---------- Búsqueda ---------- */
   useEffect(() => {
@@ -373,7 +601,7 @@ export default function ClientMap() {
 
     const timer = setTimeout(() => {
       const filtered = allPoints
-        .filter(matchesRegion)
+        .filter(matchesFilters)
         .filter((p) => {
           const codigo = p.codigo.toLowerCase();
           const nombre = (p.nombre || '').toLowerCase();
@@ -387,7 +615,7 @@ export default function ClientMap() {
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [searchQuery, allPoints, selectedRegion]);
+  }, [searchQuery, allPoints, selectedRegion, selectedEstado]);
 
   const centerMapOnPoint = (p: Punto) => {
     setSelectedPoint(p);
@@ -402,26 +630,26 @@ export default function ClientMap() {
     () => ({
       sites: sites.length,
       cuads: cuadrillas.length,
-      tickets: tickets.length,
-      total: allPoints.length,
+      tickets: totalTicketsDB, // Total real de la base de datos
+      total: sites.length + cuadrillas.length + totalTicketsDB, // Total recalculado
     }),
-    [sites, cuadrillas, tickets, allPoints]
+    [sites, cuadrillas, totalTicketsDB]
   );
 
-  // Colecciones filtradas por región (para mapa y contadores visibles)
+  // Colecciones filtradas por región y estado (para mapa y contadores visibles)
   const visibleSites = useMemo(
-    () => (selectedRegion ? sites.filter(matchesRegion) : sites),
-    [sites, selectedRegion]
+    () => (selectedRegion ? sites.filter(matchesFilters) : sites),
+    [sites, selectedRegion, selectedEstado]
   );
   const visibleCuadrillas = useMemo(
-    () => (selectedRegion ? cuadrillas.filter(matchesRegion) : cuadrillas),
-    [cuadrillas, selectedRegion]
+    () => (selectedRegion ? cuadrillas.filter(matchesFilters) : cuadrillas),
+    [cuadrillas, selectedRegion, selectedEstado]
   );
   const visibleTickets = useMemo(() => {
-    const result = selectedRegion ? tickets.filter(matchesRegion) : tickets;
-    console.log(`visibleTickets useMemo: ${result.length} tickets visible (región: "${selectedRegion || 'TODAS'}")`);
+    const result = (selectedRegion || selectedEstado) ? tickets.filter(matchesFilters) : tickets;
+    console.log(`visibleTickets useMemo: ${result.length} tickets visible (región: "${selectedRegion || 'TODAS'}", estado: "${selectedEstado || 'TODOS'}")`);
     return result;
-  }, [tickets, selectedRegion]);
+  }, [tickets, selectedRegion, selectedEstado]);
   const visibleTotal = visibleSites.length + visibleCuadrillas.length + visibleTickets.length;
 
   return (
@@ -563,6 +791,30 @@ export default function ClientMap() {
               ))}
             </select>
           </div>
+
+          {/* Selector de Estado (solo para tickets) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <label style={{ fontSize: 13, color: '#333', fontWeight: 600 }}>Estado:</label>
+            <select
+              value={selectedEstado}
+              onChange={(e) => setSelectedEstado(e.target.value)}
+              style={{
+                padding: '6px 8px',
+                border: '1px solid #ccc',
+                borderRadius: 6,
+                fontSize: 13,
+                minWidth: 150,
+                background: 'white',
+              }}
+            >
+              <option value="">Todos los estados</option>
+              {estadosCatalogo.map((estado) => (
+                <option key={estado.codigo} value={estado.nombre}>
+                  {estado.nombre}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Fila 2: Checkboxes, contadores y estado */}
@@ -616,8 +868,8 @@ export default function ClientMap() {
             <span style={{ color: '#333', fontWeight: 500, fontSize: 13 }}>
               📡 Sites: {sitesLoaded ? `${visibleSites.length}/${totals.sites}` : loadingSites ? '⏳' : 'No cargado'} | 
               👥 Cuadrillas: {cuadrillasLoaded ? `${visibleCuadrillas.length}/${totals.cuads}` : loadingCuadrillas ? '⏳' : 'No cargado'} | 
-              🎫 Tickets: {ticketsLoaded ? `${visibleTickets.length}/${totals.tickets}` : loadingTickets ? '⏳' : 'No cargado'} | 
-              🔗 Total: {visibleTotal}/{totals.total}
+              🎫 Tickets: {ticketsLoaded ? `${selectedEstado ? totalTicketsFiltrados : totals.tickets}/${totals.tickets}` : loadingTickets ? '⏳' : 'No cargado'} | 
+              🔗 Total: {(selectedEstado ? totalTicketsFiltrados : totals.total)}/{totals.total}
             </span>
           </div>
 
@@ -752,19 +1004,16 @@ export default function ClientMap() {
                 eventHandlers={{ click: () => centerMapOnPoint(t) }}
               >
                 <Popup>
-                  <b>🎫 TICKETS</b>
-                  <br />
-                  Cantidad: {t.ticketId}
-                  <br />
-                  Site: {t.codigo}
-                  <br />
-                  Estados: {t.estadoTicket}
-                  <br />
-                  Categorías: {t.categoria}
-                  <br />
-                  Región: {t.region}
-                  <br />
-                  {t.latitud}, {t.longitud}
+                  <DynamicTicketPopup 
+                    siteCode={t.codigo}
+                    siteName={t.nombre || ''}
+                    region={t.region || ''}
+                    latitud={t.latitud}
+                    longitud={t.longitud}
+                    selectedEstado={selectedEstado}
+                    selectedRegion={selectedRegion}
+                    getFilteredTicketInfo={getFilteredTicketInfo}
+                  />
                 </Popup>
               </CircleMarker>
             );

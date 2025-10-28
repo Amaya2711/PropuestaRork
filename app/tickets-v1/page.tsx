@@ -5,6 +5,12 @@ import { supabase } from '@/lib/supabaseClient';
 import Link from 'next/link';
 import type { TicketV1 } from '@/lib/tickets/types'; // ✅ tipo correcto
 
+interface Estado {
+  id: number;
+  codigo: string;
+  nombre: string;
+}
+
 // 🔧 Tamaño de página
 const PAGE_SIZE = 10;
 
@@ -40,6 +46,27 @@ export default function TicketsV1Page() {
   const [qText, setQText] = useState('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [estados, setEstados] = useState<Estado[]>([]);
+  const [selectedEstado, setSelectedEstado] = useState<string>('');
+
+  // Cargar estados del catálogo
+  async function loadEstados() {
+    try {
+      const { data, error } = await supabase
+        .from('CATALOGO_ESTADOS')
+        .select('id, codigo, nombre')
+        .order('id');
+      
+      if (error) {
+        console.error('Error cargando estados:', error);
+        return;
+      }
+      
+      setEstados(data || []);
+    } catch (error) {
+      console.error('Error cargando estados:', error);
+    }
+  }
 
   const SELECT = [
     'id',
@@ -66,6 +93,12 @@ export default function TicketsV1Page() {
       .order('created_at', { ascending: false })
       .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
 
+    // Filtro por estado
+    if (selectedEstado && selectedEstado !== '') {
+      q = q.eq('estado', selectedEstado);
+    }
+
+    // Filtro por texto
     const term = qText.trim();
     if (term) {
       q = q.or(
@@ -126,7 +159,11 @@ export default function TicketsV1Page() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qText, page]);
+  }, [qText, page, selectedEstado]);
+
+  useEffect(() => {
+    loadEstados();
+  }, []);
 
   // 🧩 Funciones auxiliares de formato (sin cambios)
   const formatDateTime = (value: string | null) => {
@@ -199,6 +236,58 @@ export default function TicketsV1Page() {
         />
       </div>
 
+      {/* Filtros */}
+      <div style={{ marginBottom: '20px', display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <label style={{ fontWeight: 'bold', color: '#495057', fontSize: '14px' }}>
+            Estado:
+          </label>
+          <select
+            value={selectedEstado}
+            onChange={(e) => {
+              setPage(1);
+              setSelectedEstado(e.target.value);
+            }}
+            style={{
+              padding: '8px 12px',
+              border: '1px solid #ced4da',
+              borderRadius: '4px',
+              fontSize: '14px',
+              backgroundColor: 'white',
+              color: '#495057',
+              minWidth: '150px'
+            }}
+          >
+            <option value="">Todos los estados</option>
+            {estados.map((estado) => (
+              <option key={estado.id} value={estado.nombre}>
+                {estado.nombre}
+              </option>
+            ))}
+          </select>
+        </div>
+        
+        {(selectedEstado) && (
+          <button
+            onClick={() => {
+              setPage(1);
+              setSelectedEstado('');
+            }}
+            style={{
+              padding: '6px 12px',
+              backgroundColor: '#6c757d',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              fontSize: '12px',
+              cursor: 'pointer'
+            }}
+          >
+            Limpiar filtros
+          </button>
+        )}
+      </div>
+
       {/* Estados de carga y sin resultados */}
       {loading && <div style={{ textAlign: 'center', padding: '40px', color: '#007bff', fontSize: '18px' }}>🔄 Cargando tickets...</div>}
       {!loading && rows.length === 0 && (
@@ -257,9 +346,36 @@ export default function TicketsV1Page() {
                     </td>
                     <td style={{ padding: '12px', color: '#666' }}>{formatDateTime(t.created_at)}</td>
                     <td style={{ padding: '12px', textAlign: 'center' }}>
-                      <Link href={`/tickets-v1/${t.id}/edit`} style={{ padding: '6px 12px', backgroundColor: '#007bff', color: 'white', textDecoration: 'none', borderRadius: '4px', fontSize: '12px' }}>
-                        Editar
-                      </Link>
+                      {t.estado?.toLowerCase().trim() === 'resuelto' ? (
+                        <span 
+                          style={{ 
+                            padding: '6px 12px', 
+                            backgroundColor: '#6c757d', 
+                            color: 'white', 
+                            borderRadius: '4px', 
+                            fontSize: '12px',
+                            opacity: 0.6,
+                            cursor: 'not-allowed'
+                          }}
+                          title="No se puede editar un ticket resuelto"
+                        >
+                          No Editable
+                        </span>
+                      ) : (
+                        <Link 
+                          href={`/tickets-v1/${t.id}/edit`} 
+                          style={{ 
+                            padding: '6px 12px', 
+                            backgroundColor: '#007bff', 
+                            color: 'white', 
+                            textDecoration: 'none', 
+                            borderRadius: '4px', 
+                            fontSize: '12px' 
+                          }}
+                        >
+                          Editar
+                        </Link>
+                      )}
                     </td>
                   </tr>
                 ))}

@@ -31,7 +31,6 @@ const TIPOS = [
   'TX'
 ];
 
-const SEVERIDADES = ['BAJA', 'MEDIA', 'ALTA', 'CRITICA'];
 const ESTADOS = ['NUEVO', 'ASIGNADO', 'EN_PROCESO', 'RESUELTO', 'CERRADO'];
 
 export default function NuevoTicketV1() {
@@ -44,12 +43,13 @@ export default function NuevoTicketV1() {
   const [tiposAtencion, setTiposAtencion] = useState<any[]>([]);
   const [plataformasAfectadas, setPlataformasAfectadas] = useState<any[]>([]);
   const [serviciosAfectados, setServiciosAfectados] = useState<any[]>([]);
+  const [nivelesFalla, setNivealesFalla] = useState<any[]>([]);
   
   const [formData, setFormData] = useState({
     ticket_source: '',
     task_category: '',
     task_subcategory: '',
-    fault_level: 'MEDIA',
+    fault_level: '',
     estado: 'NUEVO',
     platform_affected: '',
     attention_type: '',
@@ -74,17 +74,17 @@ export default function NuevoTicketV1() {
         if (error) {
           console.log('Error con catalogo_pla_afectada (minúsculas):', error);
           // Probar con el nombre original
-          return supabase.from('catalogo_pla_Afectada').select('*');
-        }
-        console.log('Plataformas afectadas data (minúsculas):', data);
-        setPlataformasAfectadas(data || []);
-        return { data, error: null };
-      })
-      .then(({ data, error }) => {
-        if (error) {
-          console.log('Error con catalogo_pla_Afectada:', error);
-        } else if (data) {
-          console.log('Plataformas afectadas data (mixtas):', data);
+          supabase.from('catalogo_pla_Afectada').select('*')
+            .then(({ data, error }) => {
+              if (error) {
+                console.log('Error con catalogo_pla_Afectada:', error);
+              } else if (data) {
+                console.log('Plataformas afectadas data (mixtas):', data);
+                setPlataformasAfectadas(data || []);
+              }
+            });
+        } else {
+          console.log('Plataformas afectadas data (minúsculas):', data);
           setPlataformasAfectadas(data || []);
         }
       });
@@ -97,6 +97,26 @@ export default function NuevoTicketV1() {
         if (!error && data) {
           setServiciosAfectados(data);
           console.log('Servicios cargados exitosamente:', data.length);
+        }
+      });
+
+    // Cargar niveles de falla desde catalogo_falla
+    console.log('Intentando cargar niveles de falla...');
+    supabase.from('catalogo_falla').select('*').eq('activo', true).order('codigo')
+      .then(({ data, error }) => {
+        console.log('Resultado niveles de falla:', { data, error });
+        if (!error && data) {
+          setNivealesFalla(data);
+          console.log('Niveles de falla cargados exitosamente:', data.length);
+        } else if (error) {
+          console.log('Error cargando niveles de falla, usando valores por defecto');
+          // Fallback a valores estáticos si la tabla no existe
+          setNivealesFalla([
+            { codigo: 'P3', nombre: 'BAJA' },
+            { codigo: 'P2', nombre: 'MEDIA' },
+            { codigo: 'P1', nombre: 'ALTA' },
+            { codigo: 'P0', nombre: 'CRITICA' }
+          ]);
         }
       });
   }, []);
@@ -157,6 +177,12 @@ export default function NuevoTicketV1() {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
+    
+    // El estado siempre debe permanecer como 'NUEVO' para tickets nuevos
+    if (name === 'estado') {
+      return; // Ignorar cambios al campo estado
+    }
+    
     setFormData(prev => ({
       ...prev,
       [name]: value
@@ -181,7 +207,7 @@ export default function NuevoTicketV1() {
         task_category: formData.task_category || null,
         task_subcategory: formData.task_subcategory || null,
         fault_level: formData.fault_level,
-        estado: formData.estado,
+        estado: 'NUEVO', // Siempre forzar estado NUEVO para tickets nuevos
         platform_affected: formData.platform_affected || null,
         attention_type: formData.attention_type || null,
         service_affected: formData.service_affected || null,
@@ -400,8 +426,11 @@ export default function NuevoTicketV1() {
                   fontSize: '14px'
                 }}
               >
-                {SEVERIDADES.map(s => (
-                  <option key={s} value={s}>{s}</option>
+                <option value="">Seleccionar nivel de falla</option>
+                {nivelesFalla.map(nivel => (
+                  <option key={nivel.codigo} value={nivel.nombre}>
+                    {nivel.codigo} - {nivel.nombre}
+                  </option>
                 ))}
               </select>
             </div>
@@ -410,22 +439,24 @@ export default function NuevoTicketV1() {
               <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
                 Estado inicial
               </label>
-              <select
-                name="estado"
-                value={formData.estado}
-                onChange={handleInputChange}
+              <input
+                type="text"
+                value="NUEVO"
+                disabled
                 style={{
                   width: '100%',
                   padding: '10px',
                   border: '2px solid #dee2e6',
                   borderRadius: '6px',
-                  fontSize: '14px'
+                  fontSize: '14px',
+                  backgroundColor: '#f8f9fa',
+                  color: '#6c757d',
+                  cursor: 'not-allowed'
                 }}
-              >
-                {ESTADOS.map(e => (
-                  <option key={e} value={e}>{e}</option>
-                ))}
-              </select>
+              />
+              <small style={{ color: '#6c757d', fontSize: '12px', marginTop: '5px', display: 'block' }}>
+                Los tickets nuevos siempre inician con estado NUEVO
+              </small>
             </div>
           </div>
 

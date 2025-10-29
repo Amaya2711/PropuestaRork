@@ -10,6 +10,7 @@ const DESCRIPCIONES = [
   'Caida',
   'Caida de clientes',
   'Corte_Energia',
+  'Corte_Energia',
   'Energia',
   'MBTS',
   'Solicitud cliente',
@@ -18,7 +19,7 @@ const DESCRIPCIONES = [
 
 const TIPOS = [
   'CORTE ENERGIA',
-  'ENERGIA',
+  'ENERGIA', 
   'MBTS',
   'PEXT - Atenuacion de FO',
   'PEXT - Corte de FO',
@@ -30,7 +31,7 @@ const TIPOS = [
   'TX'
 ];
 
-const SEVERIDADES = ['BAJA', 'MEDIA', 'ALTA', 'CRITICA'];
+const SEVERIDADES = ['BAJA', 'MEDIA', 'ALTA', 'CRITICA', '2-High', '1-Low', '3-Critical'];
 const ESTADOS = ['NUEVO', 'ASIGNADO', 'EN_PROCESO', 'RESUELTO', 'CERRADO'];
 
 export default function EditarTicketV1({ params }: { params: { id: string } }) {
@@ -57,9 +58,36 @@ export default function EditarTicketV1({ params }: { params: { id: string } }) {
         return;
       }
 
-      setTicket(data);
-      if (data.codigo_site) {
-        setSiteQ(`${data.codigo_site}`);
+      // Verificar si el ticket está resuelto
+      if (data.estado?.toLowerCase().trim() === 'resuelto') {
+        setMensaje('Este ticket está resuelto y no puede ser editado.');
+        setLoading(false);
+        return;
+      }
+
+      // Mapear los datos del ticket a los campos del formulario
+      const mappedTicket = {
+        id: data.id,
+        folio: data.ticket_source,
+        descripcion: data.task_category,
+        tipo_falla: data.task_subcategory,
+        severidad: data.fault_level || 'MEDIA',
+        estado: data.estado || 'NUEVO',
+        detalle: data.service_affected,
+        codigo_site: data.site_id,
+        created_by: data.attention_type,
+        created_at: data.created_at,
+        updated_at: data.updated_at,
+        detectado_at: data.fault_occur_time,
+        resuelto_at: data.complete_time
+      };
+
+      console.log('Datos originales del ticket:', data);
+      console.log('Datos mapeados para el formulario:', mappedTicket);
+      
+      setTicket(mappedTicket);
+      if (data.site_id) {
+        setSiteQ(`${data.site_id}`);
       }
     };
 
@@ -106,18 +134,19 @@ export default function EditarTicketV1({ params }: { params: { id: string } }) {
         return;
       }
 
+      // Mapear los datos del formulario de vuelta a la estructura de la base de datos
       const updateData = {
-        folio: ticket.folio,
-        descripcion: ticket.descripcion,
-        tipo_falla: ticket.tipo_falla,
-        severidad: ticket.severidad,
+        ticket_source: ticket.folio,
+        task_category: ticket.descripcion,
+        task_subcategory: ticket.tipo_falla,
+        fault_level: ticket.severidad,
         estado: ticket.estado,
-        detalle: ticket.detalle,
-        codigo_site: ticket.codigo_site || null,
-        created_by: ticket.created_by,
+        service_affected: ticket.detalle,
+        site_id: ticket.codigo_site || null,
+        attention_type: ticket.created_by,
         updated_at: new Date().toISOString(),
-        // Actualizar resuelto_at si el estado cambia a RESUELTO o CERRADO
-        resuelto_at: (ticket.estado === 'RESUELTO' || ticket.estado === 'CERRADO') 
+        // Actualizar complete_time si el estado cambia a RESUELTO o CERRADO
+        complete_time: (ticket.estado === 'RESUELTO' || ticket.estado === 'CERRADO') 
           ? ticket.resuelto_at || new Date().toISOString()
           : ticket.resuelto_at
       };
@@ -151,6 +180,21 @@ export default function EditarTicketV1({ params }: { params: { id: string } }) {
     return (
       <div style={{ textAlign: 'center', padding: '60px' }}>
         <h2>🔄 Cargando ticket...</h2>
+        {mensaje && (
+          <div style={{
+            padding: '15px',
+            marginTop: '20px',
+            backgroundColor: mensaje.includes('Error') ? '#f8d7da' : '#d4edda',
+            color: mensaje.includes('Error') ? '#721c24' : '#155724',
+            border: `1px solid ${mensaje.includes('Error') ? '#f5c6cb' : '#c3e6cb'}`,
+            borderRadius: '6px',
+            fontWeight: 'bold',
+            maxWidth: '400px',
+            margin: '20px auto'
+          }}>
+            {mensaje}
+          </div>
+        )}
       </div>
     );
   }
@@ -209,19 +253,54 @@ export default function EditarTicketV1({ params }: { params: { id: string } }) {
         <h3 style={{ margin: '0 0 15px 0', color: '#495057' }}>Información del Ticket</h3>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', fontSize: '14px' }}>
           <div><strong>ID:</strong> {ticket.id}</div>
+          <div><strong>Folio:</strong> {ticket.folio || 'N/A'}</div>
+          <div><strong>Estado Actual:</strong> {ticket.estado || 'N/A'}</div>
           <div><strong>Creado:</strong> {formatDate(ticket.created_at)}</div>
           <div><strong>Actualizado:</strong> {formatDate(ticket.updated_at)}</div>
-          <div><strong>Detectado:</strong> {formatDate(ticket.detectado_at)}</div>
+          <div><strong>Detectado:</strong> {formatDate(ticket.detectado_at) || 'N/A'}</div>
           <div><strong>Resuelto:</strong> {formatDate(ticket.resuelto_at) || 'Pendiente'}</div>
+          <div><strong>Site:</strong> {ticket.codigo_site || 'N/A'}</div>
+          <div><strong>Severidad:</strong> {ticket.severidad || 'N/A'}</div>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} style={{ 
-        backgroundColor: 'white',
-        padding: '30px',
-        borderRadius: '10px',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-      }}>
+      {ticket.estado?.toLowerCase().trim() === 'resuelto' ? (
+        <div style={{
+          backgroundColor: '#f8f9fa',
+          padding: '30px',
+          borderRadius: '10px',
+          border: '2px solid #6c757d',
+          textAlign: 'center'
+        }}>
+          <h3 style={{ color: '#6c757d', marginBottom: '20px' }}>
+            🔒 Ticket Resuelto - Solo Lectura
+          </h3>
+          <p style={{ color: '#6c757d', fontSize: '16px' }}>
+            Este ticket ha sido marcado como <strong>RESUELTO</strong> y no puede ser modificado.
+          </p>
+          <div style={{ marginTop: '20px' }}>
+            <Link 
+              href="/tickets-v1"
+              style={{
+                padding: '12px 24px',
+                backgroundColor: '#007bff',
+                color: 'white',
+                textDecoration: 'none',
+                borderRadius: '6px',
+                fontSize: '16px'
+              }}
+            >
+              ← Volver a la Lista de Tickets
+            </Link>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} style={{ 
+          backgroundColor: 'white',
+          padding: '30px',
+          borderRadius: '10px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+        }}>
         
         {/* Información básica */}
         <div style={{ marginBottom: '30px' }}>
@@ -295,6 +374,10 @@ export default function EditarTicketV1({ params }: { params: { id: string } }) {
                 }}
               >
                 <option value="">Seleccionar descripción</option>
+                {/* Mostrar el valor actual si no está en la lista */}
+                {ticket.descripcion && !DESCRIPCIONES.includes(ticket.descripcion) && (
+                  <option value={ticket.descripcion}>{ticket.descripcion} (actual)</option>
+                )}
                 {DESCRIPCIONES.map(d => (
                   <option key={d} value={d}>{d}</option>
                 ))}
@@ -319,6 +402,10 @@ export default function EditarTicketV1({ params }: { params: { id: string } }) {
                 }}
               >
                 <option value="">Seleccionar tipo de falla</option>
+                {/* Mostrar el valor actual si no está en la lista */}
+                {ticket.tipo_falla && !TIPOS.includes(ticket.tipo_falla) && (
+                  <option value={ticket.tipo_falla}>{ticket.tipo_falla} (actual)</option>
+                )}
                 {TIPOS.map(t => (
                   <option key={t} value={t}>{t}</option>
                 ))}
@@ -370,6 +457,10 @@ export default function EditarTicketV1({ params }: { params: { id: string } }) {
                   fontSize: '14px'
                 }}
               >
+                {/* Mostrar el valor actual si no está en la lista */}
+                {ticket.severidad && !SEVERIDADES.includes(ticket.severidad) && (
+                  <option value={ticket.severidad}>{ticket.severidad} (actual)</option>
+                )}
                 {SEVERIDADES.map(s => (
                   <option key={s} value={s}>{s}</option>
                 ))}
@@ -392,6 +483,10 @@ export default function EditarTicketV1({ params }: { params: { id: string } }) {
                   fontSize: '14px'
                 }}
               >
+                {/* Mostrar el valor actual si no está en la lista */}
+                {ticket.estado && !ESTADOS.includes(ticket.estado) && (
+                  <option value={ticket.estado}>{ticket.estado} (actual)</option>
+                )}
                 {ESTADOS.map(e => (
                   <option key={e} value={e}>{e}</option>
                 ))}
@@ -461,6 +556,7 @@ export default function EditarTicketV1({ params }: { params: { id: string } }) {
           </button>
         </div>
       </form>
+      )}
     </div>
   );
 }

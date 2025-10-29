@@ -22,6 +22,10 @@ const Popup = dynamic(
   async () => (await import('react-leaflet')).Popup,
   { ssr: false }
 );
+const Polyline = dynamic(
+  async () => (await import('react-leaflet')).Polyline,
+  { ssr: false }
+);
 
 /* ===================== Tipos ===================== */
 type SiteDB = {
@@ -212,6 +216,34 @@ export default function ClientMap() {
   const [totalTicketsDB, setTotalTicketsDB] = useState<number>(0);
   // Total de tickets filtrados por estado
   const [totalTicketsFiltrados, setTotalTicketsFiltrados] = useState<number>(0);
+
+  // Estados para la simulación de cuadrilla 17 (Punta Negra → La Punta)
+  const [simulationActive, setSimulationActive] = useState(false);
+  const [simulationProgress, setSimulationProgress] = useState(0);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [totalSteps, setTotalSteps] = useState(100);
+  const [simulatedPosition, setSimulatedPosition] = useState({ lat: -12.3655, lng: -76.786828 });
+  const [simulationStep, setSimulationStep] = useState(0);
+  const [realRoutePoints, setRealRoutePoints] = useState<Array<{lat: number, lng: number}>>([]);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [routeError, setRouteError] = useState<string | null>(null);
+  const [autoRefreshInterval, setAutoRefreshInterval] = useState<NodeJS.Timeout | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
+
+  // Estados para la simulación de cuadrilla 31 (Miraflores → Los Olivos)
+  const [simulation31Active, setSimulation31Active] = useState(false);
+  const [simulation31Progress, setSimulation31Progress] = useState(0);
+  const [current31Step, setCurrent31Step] = useState(0);
+  const [total31Steps, setTotal31Steps] = useState(100);
+  const [simulated31Position, setSimulated31Position] = useState({ lat: -12.121011, lng: -77.036997 });
+  const [simulation31Step, setSimulation31Step] = useState(0);
+  const [real31RoutePoints, setReal31RoutePoints] = useState<Array<{lat: number, lng: number}>>([]);
+  const [route31Loading, setRoute31Loading] = useState(false);
+  const [route31Error, setRoute31Error] = useState<string | null>(null);
+  const [autoRefresh31Interval, setAutoRefresh31Interval] = useState<NodeJS.Timeout | null>(null);
+  const [isRefreshing31, setIsRefreshing31] = useState(false);
+  const [lastUpdate31Time, setLastUpdate31Time] = useState<Date | null>(null);
 
   // Función para obtener información filtrada de tickets por site
   const getFilteredTicketInfo = async (siteCode: string) => {
@@ -439,10 +471,272 @@ export default function ClientMap() {
     }
   };
 
-  const handleCuadrillasChange = (checked: boolean) => {
+  // Función para obtener ruta real para cuadrilla 17 (Punta Negra → La Punta)
+  const calculateRealRoute = async () => {
+    const start = { lat: -12.3655, lng: -76.786828 }; // Punta Negra
+    const end = { lat: -12.07194, lng: -77.16225 };   // La Punta
+    
+    setRouteLoading(true);
+    setRouteError(null);
+    
+    try {
+      console.log('🔍 Calculando ruta real desde OpenRouteService...');
+      
+      const apiKey = '5b3ce3597851110001cf6248d6c3df6c6cb541f79ff7c7ff37aca6ee';
+      const profile = 'driving-car';
+      
+      const url = `https://api.openrouteservice.org/v2/directions/${profile}?` +
+        `api_key=${apiKey}&` +
+        `start=${start.lng},${start.lat}&` +
+        `end=${end.lng},${end.lat}&` +
+        `format=geojson`;
+      
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.features && data.features[0] && data.features[0].geometry) {
+        const coordinates = data.features[0].geometry.coordinates;
+        
+        const routePoints = coordinates.map((coord: number[]) => ({
+          lat: coord[1],
+          lng: coord[0]
+        }));
+        
+        const step = Math.max(1, Math.floor(routePoints.length / 100));
+        const sampledPoints = [];
+        
+        for (let i = 0; i < routePoints.length; i += step) {
+          sampledPoints.push(routePoints[i]);
+        }
+        
+        if (sampledPoints.length > 0) {
+          sampledPoints[sampledPoints.length - 1] = { lat: end.lat, lng: end.lng };
+        }
+        
+        while (sampledPoints.length < 100 && routePoints.length > sampledPoints.length) {
+          const lastIndex = sampledPoints.length * step;
+          if (lastIndex < routePoints.length) {
+            sampledPoints.push(routePoints[lastIndex]);
+          } else {
+            break;
+          }
+        }
+        
+        console.log(`🛣️ Ruta real calculada: ${sampledPoints.length} puntos de ${routePoints.length} originales`);
+        
+        setRealRoutePoints(sampledPoints);
+        return sampledPoints;
+        
+      } else {
+        throw new Error('No se encontró una ruta válida en la respuesta');
+      }
+      
+    } catch (error) {
+      console.error('❌ Error calculando ruta real:', error);
+      setRouteError(`Error: ${error}`);
+      
+      console.log('🔄 Usando ruta de fallback...');
+      const fallbackRoute = generateFallbackRoute();
+      setRealRoutePoints(fallbackRoute);
+      return fallbackRoute;
+      
+    } finally {
+      setRouteLoading(false);
+    }
+  };
+
+  // Ruta de fallback si la API falla
+  const generateFallbackRoute = () => {
+    const start = { lat: -12.3655, lng: -76.786828 };
+    const end = { lat: -12.07194, lng: -77.16225 };
+    
+    const fallbackWaypoints = [
+      start,
+      { lat: -12.3500, lng: -76.7700 },
+      { lat: -12.2800, lng: -76.7300 },
+      { lat: -12.2000, lng: -76.6900 },
+      { lat: -12.1200, lng: -76.6500 },
+      { lat: -12.0900, lng: -76.7000 },
+      { lat: -12.0800, lng: -76.8000 },
+      { lat: -12.0750, lng: -76.9000 },
+      end
+    ];
+    
+    const points = [];
+    const pointsPerSegment = Math.floor(100 / (fallbackWaypoints.length - 1));
+    
+    for (let i = 0; i < fallbackWaypoints.length - 1; i++) {
+      const current = fallbackWaypoints[i];
+      const next = fallbackWaypoints[i + 1];
+      
+      for (let j = 0; j < pointsPerSegment; j++) {
+        const progress = j / pointsPerSegment;
+        points.push({
+          lat: current.lat + (next.lat - current.lat) * progress,
+          lng: current.lng + (next.lng - current.lng) * progress
+        });
+      }
+    }
+    
+    while (points.length < 100) {
+      points.push(end);
+    }
+    
+    return points.slice(0, 100);
+  };
+
+  // Función para obtener ruta real para cuadrilla 31 (Miraflores → Los Olivos)
+  const calculateReal31Route = async () => {
+    const start = { lat: -12.121011, lng: -77.036997 }; // Miraflores
+    const end = { lat: -11.965198, lng: -77.066601 };   // Los Olivos
+    
+    setRoute31Loading(true);
+    setRoute31Error(null);
+    
+    try {
+      console.log('🔍 Calculando ruta real para cuadrilla 31...');
+      
+      const apiKey = '5b3ce3597851110001cf6248d6c3df6c6cb541f79ff7c7ff37aca6ee';
+      const profile = 'driving-car';
+      
+      const url = `https://api.openrouteservice.org/v2/directions/${profile}?` +
+        `api_key=${apiKey}&` +
+        `start=${start.lng},${start.lat}&` +
+        `end=${end.lng},${end.lat}&` +
+        `format=geojson`;
+      
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.features && data.features[0] && data.features[0].geometry) {
+        const coordinates = data.features[0].geometry.coordinates;
+        
+        const routePoints31 = coordinates.map((coord: number[]) => ({
+          lat: coord[1],
+          lng: coord[0]
+        }));
+        
+        const step = Math.max(1, Math.floor(routePoints31.length / 100));
+        const sampledPoints = [];
+        
+        for (let i = 0; i < routePoints31.length; i += step) {
+          sampledPoints.push(routePoints31[i]);
+        }
+        
+        if (sampledPoints.length > 0) {
+          sampledPoints[sampledPoints.length - 1] = { lat: end.lat, lng: end.lng };
+        }
+        
+        while (sampledPoints.length < 100 && routePoints31.length > sampledPoints.length) {
+          const lastIdx = sampledPoints.length * step;
+          if (lastIdx < routePoints31.length) {
+            sampledPoints.push(routePoints31[lastIdx]);
+          } else {
+            break;
+          }
+        }
+        
+        console.log(`🛣️ Ruta real cuadrilla 31 calculada: ${sampledPoints.length} puntos`);
+        
+        setReal31RoutePoints(sampledPoints);
+        return sampledPoints;
+        
+      } else {
+        throw new Error('No se encontró una ruta válida');
+      }
+      
+    } catch (error) {
+      console.error('❌ Error calculando ruta cuadrilla 31:', error);
+      setRoute31Error(`Error: ${error}`);
+      
+      const fallbackRoute = generateFallback31Route();
+      setReal31RoutePoints(fallbackRoute);
+      return fallbackRoute;
+      
+    } finally {
+      setRoute31Loading(false);
+    }
+  };
+
+  // Ruta de fallback para cuadrilla 31
+  const generateFallback31Route = () => {
+    const start = { lat: -12.121011, lng: -77.036997 }; // Miraflores
+    const end = { lat: -11.965198, lng: -77.066601 };   // Los Olivos
+    
+    const fallbackWaypoints = [
+      start,
+      { lat: -12.1100, lng: -77.0400 },
+      { lat: -12.0900, lng: -77.0450 },
+      { lat: -12.0700, lng: -77.0500 },
+      { lat: -12.0500, lng: -77.0550 },
+      { lat: -12.0300, lng: -77.0600 },
+      { lat: -12.0100, lng: -77.0650 },
+      { lat: -11.9900, lng: -77.0670 },
+      end
+    ];
+    
+    const points = [];
+    const pointsPerSegment = Math.floor(100 / (fallbackWaypoints.length - 1));
+    
+    for (let i = 0; i < fallbackWaypoints.length - 1; i++) {
+      const current = fallbackWaypoints[i];
+      const next = fallbackWaypoints[i + 1];
+      
+      for (let j = 0; j < pointsPerSegment; j++) {
+        const progress = j / pointsPerSegment;
+        points.push({
+          lat: current.lat + (next.lat - current.lat) * progress,
+          lng: current.lng + (next.lng - current.lng) * progress
+        });
+      }
+    }
+    
+    while (points.length < 100) {
+      points.push(end);
+    }
+    
+    return points.slice(0, 100);
+  };
+
+  const handleCuadrillasChange = async (checked: boolean) => {
     setShowCuadrillas(checked);
     if (checked && !cuadrillasLoaded) {
       loadCuadrillas();
+    }
+    
+    // Auto-iniciar simulaciones cuando se activa "Cuadrillas"
+    if (checked) {
+      console.log('🚀 Auto-iniciando simulaciones al activar Cuadrillas...');
+      
+      // Iniciar simulación cuadrilla 17 automáticamente
+      if (!simulationActive) {
+        await startSimulation();
+      }
+      
+      // Iniciar simulación cuadrilla 31 automáticamente
+      if (!simulation31Active) {
+        await start31Simulation();
+      }
+    } else {
+      console.log('⏹️ Auto-deteniendo simulaciones al desactivar Cuadrillas...');
+      
+      if (simulationActive) {
+        await stopSimulation();
+      }
+      
+      if (simulation31Active) {
+        await stop31Simulation();
+      }
     }
   };
 
@@ -450,6 +744,134 @@ export default function ClientMap() {
     setShowTickets(checked);
     if (checked && !ticketsLoaded) {
       loadTickets();
+    }
+  };
+
+  // Funciones para controlar la simulación de cuadrilla 17
+  const startSimulation = async () => {
+    try {
+      console.log('🚀 Iniciando simulación cuadrilla 17 con ruta real...');
+      
+      const realPoints = await calculateRealRoute();
+      
+      if (!realPoints || realPoints.length === 0) {
+        console.error('❌ No se pudo calcular la ruta');
+        return;
+      }
+      
+      setSimulationActive(true);
+      setSimulationStep(0);
+      setCurrentStep(0);
+      setSimulationProgress(0);
+      setSimulatedPosition(realPoints[0]);
+      
+      const interval = setInterval(() => {
+        setSimulationStep(prevStep => {
+          const nextStep = prevStep + 1;
+          
+          if (nextStep >= realPoints.length) {
+            setSimulationActive(false);
+            setCurrentStep(100);
+            setSimulationProgress(100);
+            clearInterval(interval);
+            setAutoRefreshInterval(null);
+            console.log('🏁 Simulación cuadrilla 17 completada');
+            return prevStep;
+          }
+          
+          const newPosition = realPoints[nextStep];
+          setSimulatedPosition(newPosition);
+          setCurrentStep(nextStep + 1);
+          setSimulationProgress(Math.round(((nextStep + 1) / realPoints.length) * 100));
+          setLastUpdateTime(new Date());
+          
+          console.log(`📍 Cuadrilla 17 - Paso ${nextStep + 1}/${realPoints.length}`);
+          return nextStep;
+        });
+      }, 5000);
+      
+      setAutoRefreshInterval(interval);
+      
+    } catch (error) {
+      console.error('Error iniciando simulación cuadrilla 17:', error);
+    }
+  };
+
+  const stopSimulation = async () => {
+    try {
+      console.log('⏹️ Deteniendo simulación cuadrilla 17...');
+      setSimulationActive(false);
+      
+      if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+        setAutoRefreshInterval(null);
+      }
+    } catch (error) {
+      console.error('Error deteniendo simulación cuadrilla 17:', error);
+    }
+  };
+
+  // Funciones para controlar la simulación de cuadrilla 31
+  const start31Simulation = async () => {
+    try {
+      console.log('🚀 Iniciando simulación cuadrilla 31 con ruta real...');
+      
+      const realPoints = await calculateReal31Route();
+      
+      if (!realPoints || realPoints.length === 0) {
+        console.error('❌ No se pudo calcular la ruta para cuadrilla 31');
+        return;
+      }
+      
+      setSimulation31Active(true);
+      setSimulation31Step(0);
+      setCurrent31Step(0);
+      setSimulation31Progress(0);
+      setSimulated31Position(realPoints[0]);
+      
+      const interval = setInterval(() => {
+        setSimulation31Step(prevStep => {
+          const nextStep = prevStep + 1;
+          
+          if (nextStep >= realPoints.length) {
+            setSimulation31Active(false);
+            setCurrent31Step(100);
+            setSimulation31Progress(100);
+            clearInterval(interval);
+            setAutoRefresh31Interval(null);
+            console.log('🏁 Simulación cuadrilla 31 completada');
+            return prevStep;
+          }
+          
+          const newPosition = realPoints[nextStep];
+          setSimulated31Position(newPosition);
+          setCurrent31Step(nextStep + 1);
+          setSimulation31Progress(Math.round(((nextStep + 1) / realPoints.length) * 100));
+          setLastUpdate31Time(new Date());
+          
+          console.log(`📍 Cuadrilla 31 - Paso ${nextStep + 1}/${realPoints.length}`);
+          return nextStep;
+        });
+      }, 5000);
+      
+      setAutoRefresh31Interval(interval);
+      
+    } catch (error) {
+      console.error('Error iniciando simulación cuadrilla 31:', error);
+    }
+  };
+
+  const stop31Simulation = async () => {
+    try {
+      console.log('⏹️ Deteniendo simulación cuadrilla 31...');
+      setSimulation31Active(false);
+      
+      if (autoRefresh31Interval) {
+        clearInterval(autoRefresh31Interval);
+        setAutoRefresh31Interval(null);
+      }
+    } catch (error) {
+      console.error('Error deteniendo simulación cuadrilla 31:', error);
     }
   };
 
@@ -951,6 +1373,86 @@ export default function ClientMap() {
               </CircleMarker>
             );
           })}
+
+        {/* Simulación cuadrilla 17 (Punta Negra → La Punta) */}
+        {showCuadrillas && (
+          <>
+            {/* Cuadrilla 17 simulada en movimiento */}
+            {simulationActive && (
+              <CircleMarker
+                center={[simulatedPosition.lat, simulatedPosition.lng]}
+                radius={15}
+                pathOptions={{
+                  color: '#FF1493',
+                  fillColor: '#FF69B4',
+                  weight: 5,
+                  opacity: 1.0,
+                  fillOpacity: 0.9,
+                }}
+              >
+                <Popup>
+                  <b>🚚 CUADRILLA SIMULADA</b>
+                  <br />
+                  ID: 17 (CQ-LIM-REG-17)
+                  <br />
+                  <strong style={{ color: '#28a745' }}>
+                    🎯 EN MOVIMIENTO POR RUTA REAL
+                  </strong>
+                  <br />
+                  Paso: {currentStep}/{totalSteps}
+                  <br />
+                  Progreso: {simulationProgress}%
+                  <br />
+                  Posición: {simulatedPosition.lat.toFixed(6)}, {simulatedPosition.lng.toFixed(6)}
+                  <br />
+                  🛣️ <em>Siguiendo rutas terrestres Lima-Callao</em>
+                  <br />
+                  ⏱️ <em>Actualizándose cada 5 segundos</em>
+                </Popup>
+              </CircleMarker>
+            )}
+          </>
+        )}
+
+        {/* Simulación cuadrilla 31 (Miraflores → Los Olivos) */}
+        {showCuadrillas && (
+          <>
+            {/* Cuadrilla 31 simulada en movimiento */}
+            {simulation31Active && (
+              <CircleMarker
+                center={[simulated31Position.lat, simulated31Position.lng]}
+                radius={15}
+                pathOptions={{
+                  color: '#6f42c1',
+                  fillColor: '#9966cc',
+                  weight: 5,
+                  opacity: 1.0,
+                  fillOpacity: 0.9,
+                }}
+              >
+                <Popup>
+                  <b>🚚 CUADRILLA SIMULADA</b>
+                  <br />
+                  ID: 31 (CQ-LIM-REG-31)
+                  <br />
+                  <strong style={{ color: '#6f42c1' }}>
+                    🎯 EN MOVIMIENTO POR RUTA REAL
+                  </strong>
+                  <br />
+                  Paso: {current31Step}/{total31Steps}
+                  <br />
+                  Progreso: {simulation31Progress}%
+                  <br />
+                  Posición: {simulated31Position.lat.toFixed(6)}, {simulated31Position.lng.toFixed(6)}
+                  <br />
+                  🛣️ <em>Siguiendo rutas terrestres Miraflores-Los Olivos</em>
+                  <br />
+                  ⏱️ <em>Actualizándose cada 5 segundos</em>
+                </Popup>
+              </CircleMarker>
+            )}
+          </>
+        )}
 
         {/* Cuadrillas */}
         {showCuadrillas &&

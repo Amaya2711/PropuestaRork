@@ -17,7 +17,7 @@
 3. **🎯 Cuadrilla Normal (por Categoría)**
    - **Categoría A**: Azul (#004085 / #007bff)
    - **Categoría B**: Verde (#155724 / #28a745)  
-   - **Categoría C**: Dorado (#b8860b / #ffd700)
+   - **Categoría C**: Blanco (#333333 / #ffffff)
    - Radio: 5px normal / 8px si está dentro del radio de tickets
    - Borde: 2px normal / 4px si está dentro del radio de tickets
    - Opacidad: 0.7 normal / 0.9 si está dentro del radio de tickets
@@ -43,7 +43,7 @@
 ### Resultado Visual:
 - 🔵 Azul = Categoría A
 - 🟢 Verde = Categoría B  
-- � Dorado = Categoría C
+- ⚪ Blanco = Categoría C (con borde gris oscuro)
 - Los círculos más grandes y con borde grueso = están cerca de tickets filtrados
 
 ### Tickets Resaltados:

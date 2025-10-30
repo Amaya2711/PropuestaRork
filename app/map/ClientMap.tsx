@@ -111,7 +111,7 @@ function getCategoriaColors(categoria: 'A' | 'B' | 'C' | null | undefined): { co
     case 'B':
       return { color: '#155724', fillColor: '#28a745' }; // Verde
     case 'C':
-      return { color: '#b8860b', fillColor: '#ffd700' }; // Dorado
+      return { color: '#333333', fillColor: '#ffffff' }; // Blanco con borde gris oscuro
     default:
       return { color: '#6c757d', fillColor: '#6c757d' }; // Gris por defecto
   }
@@ -683,20 +683,26 @@ export default function ClientMap() {
         loadCuadrillas();
       }
       
-      // Solo cargar tickets si hay un estado seleccionado
-      if (selectedEstado) {
-        console.log(`🎫 Cargando tickets con estado seleccionado: ${selectedEstado}`);
-        if (!ticketsLoaded) {
-          loadTickets(selectedEstado);
-        }
-      } else {
-        console.log('⚠️ No hay estado seleccionado. Selecciona un estado para ver tickets.');
+      // Si no hay estado seleccionado, seleccionar "NUEVO" por defecto
+      let estadoAUsar = selectedEstado;
+      if (!selectedEstado || selectedEstado === '') {
+        console.log('🎫 No hay estado seleccionado. Seleccionando "NUEVO" por defecto.');
+        setSelectedEstado('NUEVO');
+        estadoAUsar = 'NUEVO';
+      }
+      
+      // Cargar tickets con el estado (existente o recién seleccionado)
+      console.log(`🎫 Cargando tickets con estado: ${estadoAUsar}`);
+      if (!ticketsLoaded) {
+        loadTickets(estadoAUsar);
       }
     } else {
       // Limpiar filtro de estado cuando se desactiva tickets
       console.log('🎫 Desactivando filtro de tickets - Limpiando datos');
       setTickets([]);
       setTicketsLoaded(false);
+      // Opcional: Restablecer estado a vacío cuando se desactivan tickets
+      setSelectedEstado('');
     }
   };
 
@@ -1146,6 +1152,56 @@ export default function ClientMap() {
               title="Radio de búsqueda de cuadrillas (1-100 km)"
             />
           </div>
+
+          {/* Leyenda de Categorías de Cuadrillas */}
+          {showCuadrillas && (
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: 15,
+              padding: '8px 12px',
+              backgroundColor: 'rgba(255, 255, 255, 0.95)',
+              borderRadius: 6,
+              border: '1px solid #dee2e6',
+              fontSize: 12,
+              fontWeight: 600
+            }}>
+              <span style={{ color: '#333', marginRight: 5 }}>Categorías:</span>
+              
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div style={{
+                  width: 12,
+                  height: 12,
+                  backgroundColor: '#007bff',
+                  border: '1px solid #004085',
+                  borderRadius: '50%'
+                }}></div>
+                <span style={{ color: '#333' }}>A = Azul</span>
+              </div>
+              
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div style={{
+                  width: 12,
+                  height: 12,
+                  backgroundColor: '#28a745',
+                  border: '1px solid #155724',
+                  borderRadius: '50%'
+                }}></div>
+                <span style={{ color: '#333' }}>B = Verde</span>
+              </div>
+              
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div style={{
+                  width: 12,
+                  height: 12,
+                  backgroundColor: '#ffffff',
+                  border: '2px solid #333333',
+                  borderRadius: '50%'
+                }}></div>
+                <span style={{ color: '#333' }}>C = Blanco</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Fila 2: Checkboxes, contadores y estado */}
@@ -1305,7 +1361,7 @@ export default function ClientMap() {
             const categoriaColors = getCategoriaColors(c.categoriaCuadrilla);
             
             // Debug: verificar categorías
-            if (c.id <= 5) { // Solo mostrar para las primeras 5 cuadrillas para no saturar logs
+            if (Number(c.id) <= 5) { // Solo mostrar para las primeras 5 cuadrillas para no saturar logs
               console.log(`Cuadrilla ${c.codigo} (ID: ${c.id}): categoria=${c.categoriaCuadrilla}, colors=`, categoriaColors);
             }
             

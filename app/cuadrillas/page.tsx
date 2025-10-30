@@ -8,10 +8,12 @@ type Row = {
   nombre: string | null;
   supervisor: string | null;
   telefono: string | null;
-  zona: string | null;        // (tu “región”/zona)
+  zona: string | null;        // (tu "región"/zona)
   activo: boolean | null;
   latitud: number | string | null;
   longitud: number | string | null; // 👈 usar longitud (no altitud)
+  tipo: 'A' | 'B' | 'C' | null;
+  categoria: 'A' | 'B' | 'C' | null;
 };
 
 export default function CuadrillasPage() {
@@ -20,9 +22,9 @@ export default function CuadrillasPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // 👇 Traemos longitud en vez de altitud
+  // 👇 Traemos longitud en vez de altitud y agregamos tipo y categoria
   const selectCols =
-    'id,nombre,supervisor,telefono,zona,activo,latitud,longitud';
+    'id,nombre,supervisor,telefono,zona,activo,latitud,longitud,tipo,categoria';
 
   async function load() {
     setLoading(true);
@@ -186,8 +188,9 @@ export default function CuadrillasPage() {
                 <th style={th}>Nombre</th>
                 <th style={th}>Supervisor</th>
                 <th style={th}>Teléfono</th>
-                <th style={th}>Región</th>
                 <th style={th}>Zona</th>
+                <th style={{ ...th, textAlign: 'center' }}>📝 Tipo</th>
+                <th style={{ ...th, textAlign: 'center' }}>🏷️ Categoría</th>
                 <th style={{ ...th, textAlign: 'center' }}>📍 Latitud</th>
                 <th style={{ ...th, textAlign: 'center' }}>🧭 Longitud</th>
                 <th style={{ ...th, textAlign: 'center' }}>Estado</th>
@@ -212,7 +215,44 @@ export default function CuadrillasPage() {
                     <td style={td}>{c.supervisor ?? '-'}</td>
                     <td style={td}>{c.telefono ?? '-'}</td>
                     <td style={td}>{c.zona ?? '-'}</td>
-                    <td style={{ ...td, textAlign: 'center' }}></td>
+                    
+                    <td style={{ ...td, textAlign: 'center' }}>
+                      {c.tipo ? (
+                        <span 
+                          style={{ 
+                            backgroundColor: c.tipo === 'A' ? '#28a745' : c.tipo === 'B' ? '#ffc107' : '#dc3545',
+                            color: c.tipo === 'B' ? '#000' : '#fff',
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            fontWeight: 'bold',
+                            fontSize: '12px'
+                          }}
+                        >
+                          TIPO {c.tipo}
+                        </span>
+                      ) : (
+                        <span style={{ color: '#6c757d' }}>No definido</span>
+                      )}
+                    </td>
+
+                    <td style={{ ...td, textAlign: 'center' }}>
+                      {c.categoria ? (
+                        <span 
+                          style={{ 
+                            backgroundColor: c.categoria === 'A' ? '#007bff' : c.categoria === 'B' ? '#28a745' : '#17a2b8',
+                            color: '#fff',
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            fontWeight: 'bold',
+                            fontSize: '12px'
+                          }}
+                        >
+                          CAT {c.categoria}
+                        </span>
+                      ) : (
+                        <span style={{ color: '#6c757d' }}>No definida</span>
+                      )}
+                    </td>
 
                     <td style={tdMonoCenter}>
                       {lat !== null ? (

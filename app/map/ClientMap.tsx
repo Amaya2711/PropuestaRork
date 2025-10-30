@@ -111,7 +111,7 @@ function getCategoriaColors(categoria: 'A' | 'B' | 'C' | null | undefined): { co
     case 'B':
       return { color: '#155724', fillColor: '#28a745' }; // Verde
     case 'C':
-      return { color: '#0c5460', fillColor: '#17a2b8' }; // Celeste
+      return { color: '#b8860b', fillColor: '#ffd700' }; // Dorado
     default:
       return { color: '#6c757d', fillColor: '#6c757d' }; // Gris por defecto
   }
@@ -781,8 +781,8 @@ export default function ClientMap() {
 
   // ¿El punto coincide con los filtros seleccionados?
   const matchesFilters = (p: Punto) => {
-    // Filtro por región
-    if (selectedRegion) {
+    // Filtro por región (solo si no es "TODAS")
+    if (selectedRegion && selectedRegion !== 'TODAS') {
       const puntoRegion = (p.region ?? '').trim();
       const regionSeleccionada = selectedRegion.trim();
       if (puntoRegion !== regionSeleccionada) {
@@ -790,8 +790,8 @@ export default function ClientMap() {
       }
     }
     
-    // Filtro por estado (solo aplica a tickets)
-    if (selectedEstado && p.tipo === 'ticket') {
+    // Filtro por estado (solo aplica a tickets y si no es "TODOS" o vacío)
+    if (selectedEstado && selectedEstado !== '' && selectedEstado !== 'TODOS' && p.tipo === 'ticket') {
       const estadosDelTicket = (p.estadoTicket ?? '').split(',').map(e => e.trim());
       const estadoSeleccionado = selectedEstado.trim();
       if (!estadosDelTicket.includes(estadoSeleccionado)) {
@@ -938,11 +938,20 @@ export default function ClientMap() {
     }
     
     // Si NO hay filtro de tickets, aplicar filtro por región (lógica original)
-    return selectedRegion ? cuadrillas.filter(matchesFilters) : cuadrillas;
+    return (selectedRegion && selectedRegion !== 'TODAS') ? cuadrillas.filter(matchesFilters) : cuadrillas;
   }, [cuadrillas, selectedRegion, selectedEstado, tickets, searchRadius]);
   const visibleTickets = useMemo(() => {
-    const result = (selectedRegion || selectedEstado) ? tickets.filter(matchesFilters) : tickets;
+    // Debug de valores exactos
+    console.log('DEBUG selectedEstado:', JSON.stringify(selectedEstado), 'tipo:', typeof selectedEstado, 'length:', selectedEstado?.length);
+    console.log('DEBUG selectedRegion:', JSON.stringify(selectedRegion), 'tipo:', typeof selectedRegion);
+    
+    // Solo aplicar filtros si hay valores específicos seleccionados (no "TODOS" o vacío)
+    const hasRegionFilter = selectedRegion && selectedRegion !== 'TODAS';
+    const hasEstadoFilter = selectedEstado && selectedEstado !== '' && selectedEstado !== 'TODOS';
+    
+    const result = (hasRegionFilter || hasEstadoFilter) ? tickets.filter(matchesFilters) : tickets;
     console.log(`visibleTickets useMemo: ${result.length} tickets visible (región: "${selectedRegion || 'TODAS'}", estado: "${selectedEstado || 'TODOS'}")`);
+    console.log('Filtros activos:', { hasRegionFilter, hasEstadoFilter, selectedRegion, selectedEstado });
     return result;
   }, [tickets, selectedRegion, selectedEstado]);
   const visibleTotal = visibleSites.length + visibleCuadrillas.length + visibleTickets.length;
@@ -1295,16 +1304,24 @@ export default function ClientMap() {
             // Obtener colores basados en categoría
             const categoriaColors = getCategoriaColors(c.categoriaCuadrilla);
             
+            // Debug: verificar categorías
+            if (c.id <= 5) { // Solo mostrar para las primeras 5 cuadrillas para no saturar logs
+              console.log(`Cuadrilla ${c.codigo} (ID: ${c.id}): categoria=${c.categoriaCuadrilla}, colors=`, categoriaColors);
+            }
+            
             return (
               <CircleMarker
                 key={`cuad-${c.codigo}`}
                 center={[c.latitud, c.longitud]}
                 radius={isCuadrilla20 ? 12 : (isSelected ? 10 : (isWithinRadius ? 8 : 5))}
                 pathOptions={{
-                  color: isCuadrilla20 ? '#ff6b00' : (isSelected ? '#ff0000' : (isWithinRadius ? '#ff9500' : categoriaColors.color)),
-                  fillColor: isCuadrilla20 ? '#ffa500' : (isSelected ? '#ffff00' : (isWithinRadius ? '#ffb84d' : categoriaColors.fillColor)),
-                  weight: isCuadrilla20 ? 4 : (isSelected ? 3 : (isWithinRadius ? 3 : 2)),
-                  fillOpacity: isCuadrilla20 ? 0.9 : (isWithinRadius ? 0.8 : 0.6),
+                  // SIEMPRE usar colores por categoría, excepto casos especiales
+                  color: isCuadrilla20 ? '#ff6b00' : (isSelected ? '#ff0000' : categoriaColors.color),
+                  fillColor: isCuadrilla20 ? '#ffa500' : (isSelected ? '#ffff00' : categoriaColors.fillColor),
+                  // Borde más grueso cuando está dentro del radio para indicar que está activo
+                  weight: isCuadrilla20 ? 4 : (isSelected ? 3 : (isWithinRadius ? 4 : 2)),
+                  // Mayor opacidad cuando está dentro del radio
+                  fillOpacity: isCuadrilla20 ? 0.9 : (isWithinRadius ? 0.9 : 0.7),
                 }}
                 eventHandlers={{ click: () => centerMapOnPoint(c) }}
               >
@@ -1371,11 +1388,13 @@ export default function ClientMap() {
               <CircleMarker
                 key={t.id}
                 center={[t.latitud, t.longitud]}
-                radius={isSelected ? 12 : 6}
+                radius={isSelected ? 14 : 8}
                 pathOptions={{
-                  color: isSelected ? '#ff0000' : '#dc3545',
+                  color: isSelected ? '#ff0000' : '#8b0000',
                   fillColor: isSelected ? '#ffff00' : '#dc3545',
-                  weight: isSelected ? 3 : 2,
+                  weight: isSelected ? 4 : 3,
+                  fillOpacity: 0.8,
+                  opacity: 1,
                 }}
                 eventHandlers={{ click: () => centerMapOnPoint(t) }}
               >

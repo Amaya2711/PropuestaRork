@@ -239,8 +239,8 @@ export default function CuadrillasPage() {
                       {c.categoria ? (
                         <span 
                           style={{ 
-                            backgroundColor: c.categoria === 'A' ? '#007bff' : c.categoria === 'B' ? '#28a745' : '#17a2b8',
-                            color: '#fff',
+                            backgroundColor: c.categoria === 'A' ? '#007bff' : c.categoria === 'B' ? '#28a745' : '#ffd700',
+                            color: c.categoria === 'C' ? '#000' : '#fff',
                             padding: '4px 8px',
                             borderRadius: '4px',
                             fontWeight: 'bold',

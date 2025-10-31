@@ -9,12 +9,14 @@ type NavItem = {
   disabled?: boolean;
 };
 
+// Menú de navegación principal - Actualizado con Google Maps
 const NAV_ITEMS: NavItem[] = [
   { href: '/', label: 'Inicio' },
   { href: '/sites-v1', label: 'Sites V1' },
   { href: '/cuadrillas', label: 'Cuadrillas' },
   { href: '/tickets-v1', label: 'Tickets V1' },
-  { href: '/map', label: 'Mapa' },
+  { href: '/map', label: 'Mapa Leaflet' },
+  { href: '/map-google', label: 'Google Maps' },
 ];
 
 export default function TopNav() {

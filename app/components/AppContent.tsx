@@ -102,6 +102,7 @@ export default function AppContent({ children }: AppContentProps) {
           <a href="/cuadrillas">Cuadrillas</a>
           <a href="/tickets-v1" style={{ fontWeight: 'bold', color: '#007bff' }}>Tickets</a>
           <a href="/map">Mapa</a>
+          <a href="/map-google" style={{ fontWeight: 'bold', color: '#dc3545' }}>Google Maps</a>
         </nav>
       </header>
 

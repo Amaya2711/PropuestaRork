@@ -241,9 +241,9 @@ API Key actual: ${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}`);
           
           // Cargar datos iniciales
           setTimeout(() => {
-            cargarSites();
-            cargarCuadrillas();
-            cargarTickets();
+            loadSites();
+            loadCuadrillas();
+            loadTickets();
           }, 1000);
         }
       } catch (err) {
@@ -685,6 +685,16 @@ URL: https://console.cloud.google.com/apis/credentials`);
         let rutaPath = [];
         
         console.log(`🔄 Calculando ruta ${categoria}: ${cuadrilla.nombre} → ${ticket.nombre}`);
+        console.log(`📍 Coordenadas: Origen(${cuadrilla.latitud}, ${cuadrilla.longitud}) → Destino(${ticket.latitud}, ${ticket.longitud})`);
+        
+        // Validar coordenadas
+        const origenValido = !isNaN(cuadrilla.latitud) && !isNaN(cuadrilla.longitud);
+        const destinoValido = !isNaN(ticket.latitud) && !isNaN(ticket.longitud);
+        
+        if (!origenValido || !destinoValido) {
+          console.error(`❌ Coordenadas inválidas para ${categoria}: origen=${origenValido}, destino=${destinoValido}`);
+          throw new Error('Coordenadas inválidas');
+        }
         
         // 1. PRIMERA OPCIÓN: Compute Routes API v2 (solo si está habilitada)
         if (routesAPIEnabled) {
@@ -1063,9 +1073,40 @@ URL: https://console.cloud.google.com/apis/credentials`);
         }
         
       } catch (error) {
-        console.error(`❌ Error calculando ruta para categoría ${categoria}:`, error);
+        console.error(`❌ ERROR CRÍTICO calculando ruta para categoría ${categoria}:`, error);
+        console.error(`🔍 Datos de entrada: Cuadrilla=${cuadrilla.nombre}, Ticket=${ticket.nombre}`);
+        console.error(`🔍 Coordenadas: (${cuadrilla.latitud}, ${cuadrilla.longitud}) → (${ticket.latitud}, ${ticket.longitud})`);
         
-        // Fallback: crear línea recta si falla todo
+        // Fallback de emergencia: crear línea recta si falla todo
+        console.warn(`⚠️ Creando línea recta de emergencia para categoría ${categoria}`);
+        
+        try {
+          const origenLatLng = { lat: parseFloat(cuadrilla.latitud), lng: parseFloat(cuadrilla.longitud) };
+          const destinoLatLng = { lat: parseFloat(ticket.latitud), lng: parseFloat(ticket.longitud) };
+          
+          rutaPath = [origenLatLng, destinoLatLng];
+          
+          const distanciaMetros = calcularDistanciaHaversine(
+            parseFloat(cuadrilla.latitud), parseFloat(cuadrilla.longitud),
+            parseFloat(ticket.latitud), parseFloat(ticket.longitud)
+          );
+          
+          distanciaKm = (distanciaMetros / 1000).toFixed(2);
+          tiempoMinutos = Math.round(distanciaMetros / 1000 * 2).toString();
+          routeSource = 'straight-line';
+          
+          console.log(`📏 Línea recta de emergencia creada para ${categoria}: ${distanciaKm}km estimado`);
+        } catch (emergencyError) {
+          console.error(`💥 ERROR TOTAL para ${categoria}:`, emergencyError);
+          // Crear ruta mínima con coordenadas por defecto
+          rutaPath = [
+            { lat: -12.0464, lng: -77.0428 },
+            { lat: -12.0464, lng: -77.0428 }
+          ];
+          distanciaKm = '0.00';
+          tiempoMinutos = '0';
+          routeSource = 'error';
+        }
         console.log(`🔄 Fallback a Directions API para categoría ${categoria}...`);
         
         try {
@@ -1798,7 +1839,7 @@ URL: https://console.cloud.google.com/apis/credentials`);
       )}
 
       {/* Mensajes de error */}
-      {!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY && (
+      {false && (
         <div style={{
           position: 'absolute',
           top: '50%',

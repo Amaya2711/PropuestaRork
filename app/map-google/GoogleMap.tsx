@@ -75,10 +75,22 @@ export default function GoogleMap() {
 
   // Debug de variables de entorno
   console.log('🔍 INIT: Verificando variables de entorno al cargar componente');
+  console.log('🌐 Entorno:', typeof window !== 'undefined' ? window.location.hostname : 'server');
   console.log('API Key presente:', !!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
-  console.log('API Key valor:', process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.substring(0, 15) + '...');
+  console.log('API Key valor:', process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.substring(0, 15) + '...' || 'undefined');
   console.log('Supabase URL presente:', !!process.env.NEXT_PUBLIC_SUPABASE_URL);
   console.log('🔍 TODAS las variables NEXT_PUBLIC:', Object.keys(process.env).filter(key => key.startsWith('NEXT_PUBLIC')));
+  
+  // Detectar si estamos en producción sin variables configuradas
+  const isProduction = typeof window !== 'undefined' && (
+    window.location.hostname.includes('vercel.app') || 
+    window.location.hostname.includes('netlify.app') ||
+    window.location.hostname !== 'localhost'
+  );
+  
+  if (isProduction && !process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) {
+    console.warn('⚠️ PRODUCCIÓN: Variables de entorno no configuradas en plataforma de despliegue');
+  }
   
   // Estados loaded
   const [sitesLoaded, setSitesLoaded] = useState(false);
@@ -119,18 +131,24 @@ export default function GoogleMap() {
         console.log('🔄 Inicializando Google Maps...');
         console.log('🔍 Verificando API Key:', process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ? 'Encontrada' : 'No encontrada');
         
-        if (!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) {
+        // Fallback para desarrollo si no se encuentra la API Key en variables de entorno
+        const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyBmtiE0jWFGUFAZXoBgF3XyXmBmJit6m6U';
+        
+        if (!apiKey || apiKey === 'undefined') {
           console.error('❌ Google Maps API Key no encontrada en variables de entorno');
           console.error('📋 Variables disponibles:', Object.keys(process.env).filter(key => key.includes('GOOGLE')));
+          console.error('🌐 Entorno actual:', window.location.hostname);
           setApiKeyError(true);
           return;
         }
+        
+        console.log('✅ Usando API Key:', apiKey.substring(0, 15) + '...');
         
         console.log('📦 Cargando Google Maps API...');
         
         // Crear script dinámicamente para evitar problemas del loader
         const script = document.createElement('script');
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places,geometry,visualization&v=weekly`;
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places,geometry,visualization&v=weekly`;
         script.async = true;
         script.defer = true;
         
@@ -293,7 +311,9 @@ export default function GoogleMap() {
     legs: any[];
   } | null> => {
     try {
-      if (!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) {
+      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyBmtiE0jWFGUFAZXoBgF3XyXmBmJit6m6U';
+      
+      if (!apiKey || apiKey === 'undefined') {
         console.error('❌ Google Maps API Key no encontrada');
         return null;
       }
@@ -334,7 +354,7 @@ export default function GoogleMap() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Goog-Api-Key': process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY,
+          'X-Goog-Api-Key': apiKey,
           'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs'
         },
         body: JSON.stringify(requestBody)
@@ -1896,12 +1916,15 @@ export default function GoogleMap() {
             padding: 20,
             flexDirection: 'column'
           }}>
-            <h3 style={{ color: '#856404', marginBottom: 16 }}>⚠️ Error de Configuración</h3>
+            <h3 style={{ color: '#856404', marginBottom: 16 }}>⚠️ Error de Configuración de Google Maps</h3>
             <p style={{ color: '#856404', textAlign: 'center', marginBottom: 16 }}>
               No se pudo cargar Google Maps. La API Key no está configurada correctamente.
             </p>
-            <div style={{ backgroundColor: '#f8f9fa', padding: 12, borderRadius: 4, fontSize: 14, color: '#6c757d' }}>
-              <strong>Para desarrolladores:</strong> Verificar que NEXT_PUBLIC_GOOGLE_MAPS_API_KEY esté definida en .env.local
+            <div style={{ backgroundColor: '#f8f9fa', padding: 12, borderRadius: 4, fontSize: 14, color: '#6c757d', textAlign: 'center' }}>
+              <div><strong>🔧 Para Desarrolladores:</strong></div>
+              <div>• Local: Agregar NEXT_PUBLIC_GOOGLE_MAPS_API_KEY a .env.local</div>
+              <div>• Vercel: Configurar variable en Settings → Environment Variables</div>
+              <div>• Valor necesario: AIzaSyBmtiE0jWFGUFAZXoBgF3XyXmBmJit6m6U</div>
             </div>
           </div>
         )}

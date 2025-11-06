@@ -406,7 +406,7 @@ export default function GoogleMap() {
       case 'B':
         return { color: '#28a745', fillColor: '#28a745', icon: 'green' }; // Verde  
       case 'C':
-        return { color: '#6c757d', fillColor: '#ffffff', icon: 'white' }; // Blanco con borde gris
+        return { color: '#9b59b6', fillColor: '#9b59b6', icon: 'purple' }; // Morado
       default:
         return { color: '#dc3545', fillColor: '#dc3545', icon: 'red' }; // Rojo por defecto
     }
@@ -769,13 +769,42 @@ export default function GoogleMap() {
     
     if (tipo === 'site') {
       color = '#28a745'; // Verde
+      return {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 8,
+        fillColor: color,
+        fillOpacity: 0.8,
+        strokeColor: '#ffffff',
+        strokeWeight: 2
+      };
     } else if (tipo === 'cuadrilla') {
       const categoriaColors = getCategoriaColors(categoria);
       color = categoriaColors.fillColor;
+      
+      // Icono de vehículo/camioneta para cuadrillas
+      return {
+        path: 'M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.22.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z',
+        scale: 1.5,
+        fillColor: color,
+        fillOpacity: 1,
+        strokeColor: '#ffffff',
+        strokeWeight: 2,
+        anchor: new google.maps.Point(12, 12),
+        labelOrigin: new google.maps.Point(12, 5)
+      };
     } else if (tipo === 'ticket') {
       color = '#ffc107'; // Amarillo
+      return {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 8,
+        fillColor: color,
+        fillOpacity: 0.8,
+        strokeColor: '#ffffff',
+        strokeWeight: 2
+      };
     }
     
+    // Fallback para otros tipos
     return {
       path: google.maps.SymbolPath.CIRCLE,
       scale: 8,

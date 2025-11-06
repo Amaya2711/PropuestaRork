@@ -1,4 +1,4 @@
--- Crear tabla CUADRILLA_RUTA para tracking de ubicación
+-- Crear tabla CUADRILLA_RUTA para tracking de ubicación (versión simplificada)
 CREATE TABLE IF NOT EXISTS public.CUADRILLA_RUTA (
     id BIGSERIAL PRIMARY KEY,
     cuadrilla_id INTEGER NOT NULL,
@@ -16,19 +16,6 @@ CREATE INDEX IF NOT EXISTS idx_cuadrilla_ruta_cuadrilla_id ON public.CUADRILLA_R
 CREATE INDEX IF NOT EXISTS idx_cuadrilla_ruta_timestamp ON public.CUADRILLA_RUTA(timestamp);
 CREATE INDEX IF NOT EXISTS idx_cuadrilla_ruta_fecha ON public.CUADRILLA_RUTA(fecha);
 
--- Habilitar RLS (Row Level Security) si es necesario
-ALTER TABLE public.CUADRILLA_RUTA ENABLE ROW LEVEL SECURITY;
-
--- Eliminar política existente si existe y crear nueva
-DROP POLICY IF EXISTS "Allow all operations on CUADRILLA_RUTA" ON public.CUADRILLA_RUTA;
-
--- Crear política para permitir lectura y escritura (ajustar según necesidades)
-CREATE POLICY "Allow all operations on CUADRILLA_RUTA" 
-ON public.CUADRILLA_RUTA 
-FOR ALL 
-USING (true) 
-WITH CHECK (true);
-
 -- Comentarios para documentación
 COMMENT ON TABLE public.CUADRILLA_RUTA IS 'Tabla para registrar el tracking de ubicación de cuadrillas cada 5 segundos durante rutas activas';
 COMMENT ON COLUMN public.CUADRILLA_RUTA.cuadrilla_id IS 'ID de la cuadrilla (referencia a tabla cuadrillas_v1)';
@@ -37,3 +24,6 @@ COMMENT ON COLUMN public.CUADRILLA_RUTA.hora IS 'Hora del registro de ubicación
 COMMENT ON COLUMN public.CUADRILLA_RUTA.timestamp IS 'Timestamp completo del registro';
 COMMENT ON COLUMN public.CUADRILLA_RUTA.latitud IS 'Latitud de la ubicación registrada';
 COMMENT ON COLUMN public.CUADRILLA_RUTA.longitud IS 'Longitud de la ubicación registrada';
+
+-- Verificar que la tabla fue creada correctamente
+SELECT 'Tabla CUADRILLA_RUTA creada exitosamente' as resultado;

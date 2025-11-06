@@ -109,6 +109,11 @@ export default function GoogleMap() {
   const [searchCuadrilla, setSearchCuadrilla] = useState<string>('');
   const [filteredCuadrillas, setFilteredCuadrillas] = useState<Punto[]>([]);
   const [selectedCuadrilla, setSelectedCuadrilla] = useState<Punto | null>(null);
+
+  // Estados para tracking de ruta
+  const [rutaActiva, setRutaActiva] = useState(false);
+  const [cuadrillaSeleccionadaParaRuta, setCuadrillaSeleccionadaParaRuta] = useState<Punto | null>(null);
+  const rutaIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
   // Estados para actualización automática
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState<boolean>(true);
@@ -410,6 +415,69 @@ export default function GoogleMap() {
       default:
         return { color: '#dc3545', fillColor: '#dc3545', icon: 'red' }; // Rojo por defecto
     }
+  };
+
+  // Función para registrar ubicación en CUADRILLA_RUTA
+  const registrarUbicacionRuta = async (cuadrilla: Punto) => {
+    try {
+      const now = new Date();
+      const fecha = now.toISOString().split('T')[0]; // YYYY-MM-DD
+      const hora = now.toTimeString().split(' ')[0]; // HH:MM:SS
+      
+      console.log(`📍 Registrando ubicación de cuadrilla ${cuadrilla.codigo} en CUADRILLA_RUTA`);
+      
+      const { error } = await supabase
+        .from('CUADRILLA_RUTA')
+        .insert({
+          cuadrilla_id: cuadrilla.id,
+          fecha: fecha,
+          hora: hora,
+          latitud: cuadrilla.latitud,
+          longitud: cuadrilla.longitud
+        });
+
+      if (error) {
+        console.error('❌ Error registrando ubicación en CUADRILLA_RUTA:', error);
+      } else {
+        console.log(`✅ Ubicación registrada: ${cuadrilla.codigo} (${cuadrilla.latitud}, ${cuadrilla.longitud})`);
+      }
+    } catch (error) {
+      console.error('❌ Error en registrarUbicacionRuta:', error);
+    }
+  };
+
+  // Función para iniciar tracking de ruta
+  const iniciarRuta = (cuadrilla: Punto) => {
+    if (rutaActiva) {
+      console.log('⚠️ Ya hay una ruta activa. Deteniendo ruta anterior...');
+      detenerRuta();
+    }
+
+    console.log(`🚀 Iniciando tracking de ruta para cuadrilla ${cuadrilla.codigo}`);
+    setRutaActiva(true);
+    setCuadrillaSeleccionadaParaRuta(cuadrilla);
+
+    // Registrar ubicación inicial
+    registrarUbicacionRuta(cuadrilla);
+
+    // Configurar intervalo para registrar cada 5 segundos
+    rutaIntervalRef.current = setInterval(() => {
+      registrarUbicacionRuta(cuadrilla);
+    }, 5000);
+
+    console.log(`⏱️ Tracking iniciado: registrando ubicación cada 5 segundos`);
+  };
+
+  // Función para detener tracking de ruta
+  const detenerRuta = () => {
+    if (rutaIntervalRef.current) {
+      clearInterval(rutaIntervalRef.current);
+      rutaIntervalRef.current = null;
+    }
+
+    console.log(`🛑 Tracking de ruta detenido para cuadrilla ${cuadrillaSeleccionadaParaRuta?.codigo}`);
+    setRutaActiva(false);
+    setCuadrillaSeleccionadaParaRuta(null);
   };
 
   // Regiones disponibles
@@ -1848,14 +1916,22 @@ export default function GoogleMap() {
             {/* Botón de prueba para cuadrillas */}
             <button
               onClick={async () => {
-                console.log('🧪 Prueba manual de carga de cuadrillas...');
-                setCuadrillasLoaded(false);
-                setLoadingCuadrillas(false);
-                await loadCuadrillas();
+                if (!rutaActiva) {
+                  // Buscar una cuadrilla para iniciar ruta (usar la primera disponible)
+                  const cuadrillaParaRuta = cuadrillas.find(c => c.latitud && c.longitud);
+                  if (cuadrillaParaRuta) {
+                    iniciarRuta(cuadrillaParaRuta);
+                  } else {
+                    console.warn('⚠️ No hay cuadrillas disponibles para iniciar ruta');
+                    alert('No hay cuadrillas cargadas. Cargar cuadrillas primero.');
+                  }
+                } else {
+                  detenerRuta();
+                }
               }}
               style={{
-                backgroundColor: '#ffc107',
-                color: '#212529',
+                backgroundColor: rutaActiva ? '#dc3545' : '#28a745',
+                color: '#ffffff',
                 border: 'none',
                 borderRadius: 6,
                 padding: '8px 16px',
@@ -1864,10 +1940,10 @@ export default function GoogleMap() {
                 cursor: 'pointer',
                 transition: 'background-color 0.2s ease'
               }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#e0a800'}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ffc107'}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = rutaActiva ? '#c82333' : '#218838'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = rutaActiva ? '#dc3545' : '#28a745'}
             >
-              🧪 TEST CUADRILLAS
+              {rutaActiva ? '🛑 DETENER RUTA' : '🚀 INICIAR RUTA'}
             </button>
           </div>
         </div>
@@ -1901,6 +1977,30 @@ export default function GoogleMap() {
             )}
           </div>
         </div>
+
+        {/* Indicador de Ruta Activa */}
+        {rutaActiva && cuadrillaSeleccionadaParaRuta && (
+          <div style={{
+            backgroundColor: '#d4edda',
+            border: '1px solid #c3e6cb',
+            borderRadius: 6,
+            padding: '8px 12px',
+            fontSize: 13,
+            color: '#155724',
+            marginBottom: 10,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between'
+          }}>
+            <div>
+              <strong>🚀 RUTA ACTIVA:</strong> Cuadrilla {cuadrillaSeleccionadaParaRuta.codigo} 
+              ({cuadrillaSeleccionadaParaRuta.nombre}) - Registrando ubicación cada 5 segundos
+            </div>
+            <div style={{ fontSize: 12, opacity: 0.8 }}>
+              📍 Última posición: ({cuadrillaSeleccionadaParaRuta.latitud}, {cuadrillaSeleccionadaParaRuta.longitud})
+            </div>
+          </div>
+        )}
 
         {/* Indicador de Filtros Activos */}
         {(filtrosActivos.region || filtrosActivos.estado) && (

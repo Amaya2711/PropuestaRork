@@ -53,50 +53,147 @@ export interface TrafficRouteService {
 
 class LocalRouteService implements TrafficRouteService {
   
-  // Usar OpenRouteService para obtener rutas reales por calles
-  private async getRealRouteFromAPI(startLng: number, startLat: number, endLng: number, endLat: number): Promise<[number, number][] | null> {
+  // Usar múltiples APIs para obtener rutas reales con COMPUTE ROUTERS
+  private async getRealRouteFromAPI(startLng: number, startLat: number, endLng: number, endLat: number): Promise<{
+    coordinates: [number, number][];
+    distance: number;
+    duration: number;
+  } | null> {
+    
+    console.log(`🚗 [COMPUTE ROUTER] Calculando ruta real desde [${startLat}, ${startLng}] hasta [${endLat}, ${endLng}]`);
+    
+    // Intentar primero con OpenRouteService
+    const openRouteResult = await this.getOpenRouteServiceRoute(startLng, startLat, endLng, endLat);
+    if (openRouteResult) return openRouteResult;
+    
+    // Fallback con GraphHopper (API gratuita alternativa)
+    const graphHopperResult = await this.getGraphHopperRoute(startLng, startLat, endLng, endLat);
+    if (graphHopperResult) return graphHopperResult;
+    
+    console.warn('⚠️ [COMPUTE ROUTER] Todas las APIs fallaron, usando cálculo estimado');
+    return null;
+  }
+
+  private async getOpenRouteServiceRoute(startLng: number, startLat: number, endLng: number, endLat: number): Promise<{
+    coordinates: [number, number][];
+    distance: number;
+    duration: number;
+  } | null> {
     try {
-      // API Key gratuita de OpenRouteService (reemplaza con tu propia key)
       const API_KEY = '5b3ce3597851110001cf62481a4a7c38540a4052b5e82c9a8e3a6f23';
-      
-      const url = `https://api.openrouteservice.org/v2/directions/driving-car`;
       
       const requestBody = {
         coordinates: [[startLng, startLat], [endLng, endLat]],
         format: "geojson",
         instructions: false,
-        geometry_simplify: false
+        geometry_simplify: false,
+        extra_info: ["waytype", "surface", "steepness"]
       };
       
-      console.log(`🚗 Obteniendo ruta real desde [${startLat}, ${startLng}] hasta [${endLat}, ${endLng}]`);
+      console.log(`� [OpenRouteService] Solicitando ruta...`);
       
-      const response = await fetch(url, {
+      const response = await fetch(`https://api.openrouteservice.org/v2/directions/driving-car`, {
         method: 'POST',
         headers: {
           'Authorization': API_KEY,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
         },
         body: JSON.stringify(requestBody)
       });
       
       if (!response.ok) {
-        console.warn(`⚠️ OpenRouteService error: ${response.status}`);
+        const errorText = await response.text();
+        console.warn(`⚠️ [OpenRouteService] Error ${response.status}:`, errorText);
         return null;
       }
       
       const data = await response.json();
       
-      if (data.features && data.features[0] && data.features[0].geometry) {
-        const coordinates = data.features[0].geometry.coordinates;
-        console.log(`✅ Ruta real obtenida: ${coordinates.length} puntos`);
-        return coordinates; // Ya está en formato [lng, lat]
+      if (data.features && data.features[0]) {
+        const feature = data.features[0];
+        const coordinates = feature.geometry.coordinates; // [lng, lat] format
+        const properties = feature.properties;
+        
+        // Convertir a [lat, lng] para Leaflet
+        const leafletCoords: [number, number][] = coordinates.map((coord: number[]) => [coord[1], coord[0]]);
+        
+        console.log(`✅ [OpenRouteService] Ruta obtenida:`, {
+          puntos: coordinates.length,
+          distancia: (properties.segments[0].distance / 1000).toFixed(2) + 'km',
+          tiempo: (properties.segments[0].duration / 60).toFixed(1) + 'min'
+        });
+        
+        return {
+          coordinates: leafletCoords,
+          distance: properties.segments[0].distance / 1000, // convertir a km
+          duration: properties.segments[0].duration / 60 // convertir a minutos
+        };
       }
       
       return null;
     } catch (error) {
-      console.warn('⚠️ Error obteniendo ruta real:', error);
+      console.warn('⚠️ [OpenRouteService] Error:', error);
       return null;
     }
+  }
+
+  private async getGraphHopperRoute(startLng: number, startLat: number, endLng: number, endLat: number): Promise<{
+    coordinates: [number, number][];
+    distance: number;
+    duration: number;
+  } | null> {
+    try {
+      // GraphHopper API gratuita (500 requests/día)
+      const API_KEY = 'YOUR_GRAPHHOPPER_KEY'; // Reemplazar con key real si se necesita
+      
+      const url = `https://graphhopper.com/api/1/route?point=${startLat},${startLng}&point=${endLat},${endLng}&vehicle=car&locale=es&calc_points=true&debug=true&type=json`;
+      
+      console.log(`🔄 [GraphHopper] Solicitando ruta...`);
+      
+      const response = await fetch(url, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!response.ok) {
+        console.warn(`⚠️ [GraphHopper] Error ${response.status}`);
+        return null;
+      }
+      
+      const data = await response.json();
+      
+      if (data.paths && data.paths[0]) {
+        const path = data.paths[0];
+        const points = path.points;
+        
+        // Decodificar polyline de GraphHopper
+        const coordinates = this.decodePolyline(points.coordinates);
+        
+        console.log(`✅ [GraphHopper] Ruta obtenida:`, {
+          puntos: coordinates.length,
+          distancia: (path.distance / 1000).toFixed(2) + 'km',
+          tiempo: (path.time / (1000 * 60)).toFixed(1) + 'min'
+        });
+        
+        return {
+          coordinates: coordinates,
+          distance: path.distance / 1000, // convertir a km
+          duration: path.time / (1000 * 60) // convertir a minutos
+        };
+      }
+      
+      return null;
+    } catch (error) {
+      console.warn('⚠️ [GraphHopper] Error:', error);
+      return null;
+    }
+  }
+
+  private decodePolyline(coordinates: number[][]): [number, number][] {
+    // GraphHopper ya devuelve coordenadas decodificadas en formato [lng, lat]
+    return coordinates.map((coord: number[]) => [coord[1], coord[0]] as [number, number]);
   }
 
   async calculateBestRoute(
@@ -134,26 +231,29 @@ class LocalRouteService implements TrafficRouteService {
         // Factor de tráfico basado en hora del día y ubicación
         const factorTrafico = this.getTrafficFactor();
         
-        // Intentar obtener ruta real por calles (como Uber)
+        // Intentar obtener ruta real por calles usando COMPUTE ROUTERS
         let ruta: [number, number][] = [];
+        let usoRutaReal = false;
+        
+        console.log(`🔄 [COMPUTE ROUTER] Cuadrilla ${cuadrilla.codigo}: Solicitando ruta real...`);
         
         const rutaReal = await this.getRealRouteFromAPI(
           cuadrilla.longitud, cuadrilla.latitud,
           ticketLng, ticketLat
         );
         
-        if (rutaReal && rutaReal.length > 2) {
-          // Usar ruta real obtenida de la API
-          ruta = rutaReal;
+        if (rutaReal && rutaReal.coordinates && rutaReal.coordinates.length > 2) {
+          // Usar datos REALES de la API
+          ruta = rutaReal.coordinates;
+          distanciaKm = rutaReal.distance; // Distancia real de la API
+          tiempoBase = rutaReal.duration;  // Tiempo real de la API
+          usoRutaReal = true;
           
-          // Recalcular distancia usando la ruta real
-          const distanciaReal = this.calculateRouteDistance(rutaReal);
-          if (distanciaReal > 0) {
-            distanciaKm = distanciaReal;
-            tiempoBase = this.calculateTravelTime(distanciaKm, cuadrilla.latitud, cuadrilla.longitud, ticketLat, ticketLng);
-          }
-          
-          console.log(`🗺️ Usando ruta REAL para ${cuadrilla.codigo}: ${rutaReal.length} puntos, ${distanciaKm.toFixed(2)}km`);
+          console.log(`✅ [COMPUTE ROUTER] Ruta REAL para ${cuadrilla.codigo}:`, {
+            puntos: ruta.length,
+            distancia: `${distanciaKm.toFixed(2)}km`,
+            tiempo: `${tiempoBase.toFixed(1)}min`
+          });
         } else {
           // Fallback: ruta estimada si la API falla
           ruta = this.generateRoutePoints(
@@ -161,11 +261,21 @@ class LocalRouteService implements TrafficRouteService {
             ticketLng, ticketLat,
             distanciaDirecta
           );
-          console.log(`⚠️ Usando ruta ESTIMADA para ${cuadrilla.codigo} (API falló)`);
+          
+          console.log(`⚠️ [COMPUTE ROUTER] Usando ruta ESTIMADA para ${cuadrilla.codigo} (API no disponible)`);
         }
         
-        // Calcular tiempo final con tráfico
-        const tiempoConTrafico = tiempoBase * factorTrafico;
+        // Calcular tiempo final con tráfico (solo si no tenemos datos reales)
+        let tiempoConTrafico: number;
+        if (usoRutaReal) {
+          // Si usamos datos reales, el tiempo ya incluye consideraciones de tráfico
+          tiempoConTrafico = tiempoBase;
+          console.log(`📊 [COMPUTE ROUTER] ${cuadrilla.codigo}: Tiempo REAL = ${tiempoBase.toFixed(1)}min`);
+        } else {
+          // Si es estimación, aplicar factor de tráfico
+          tiempoConTrafico = tiempoBase * factorTrafico;
+          console.log(`📊 [COMPUTE ROUTER] ${cuadrilla.codigo}: Tiempo ESTIMADO = ${tiempoConTrafico.toFixed(1)}min (factor ${factorTrafico})`);
+        }
         
         results.push({
           cuadrillaId: cuadrilla.id,
@@ -206,11 +316,11 @@ class LocalRouteService implements TrafficRouteService {
     
     console.log(`🎯 Calculando MEJOR ruta por categoría para ${cuadrillas.length} cuadrillas...`);
     
-    // Colores para cada categoría
+    // Colores para cada categoría (sincronizado con getCategoriaColors)
     const categoryColors = {
       'A': '#007bff', // Azul
       'B': '#28a745', // Verde  
-      'C': '#dc3545'  // Rojo (más visible que blanco)
+      'C': '#ff8c00'  // Naranja (más visible que blanco para las rutas)
     };
     
     const results: CategoryRouteResult[] = [];

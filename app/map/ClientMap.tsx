@@ -28,8 +28,8 @@ const Polyline = dynamic(
   async () => (await import('react-leaflet')).Polyline,
   { ssr: false }
 );
-const DirectRoute = dynamic(
-  async () => (await import('../components/DirectRoute')).default,
+const ComputedRoute = dynamic(
+  async () => (await import('../components/ComputedRoute')).default,
   { ssr: false }
 );
 
@@ -93,6 +93,34 @@ type Punto = {
   categoriaCuadrilla?: 'A' | 'B' | 'C' | null;
 };
 
+// Tipos específicos para la funcionalidad de selección de tickets
+type TicketMapData = {
+  id: string | number;
+  codigo: string;
+  nombre: string;
+  latitud: number;
+  longitud: number;
+  region?: string;
+  estado?: string;
+  categoria?: string;
+  tipo: 'ticket';
+};
+
+type CuadrillaMapData = {
+  id: number;
+  codigo: string;
+  nombre: string;
+  latitud: number;
+  longitud: number;
+  categoria: 'A' | 'B' | 'C' | null;
+  activo: boolean;
+  skill_1?: string | null;
+  skill_2?: string | null;
+  skill_3?: string | null;
+  tipo: 'cuadrilla';
+  region?: string;
+};
+
 /* ===================== Función de Cálculo de Distancia ===================== */
 // Función haversine para calcular la distancia entre dos puntos geográficos en kilómetros
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -117,7 +145,7 @@ function getCategoriaColors(categoria: 'A' | 'B' | 'C' | null | undefined): { co
     case 'B':
       return { color: '#155724', fillColor: '#28a745' }; // Verde
     case 'C':
-      return { color: '#333333', fillColor: '#ffffff' }; // Blanco con borde gris oscuro
+      return { color: '#cc7000', fillColor: '#ff8c00' }; // Naranja para mejor visibilidad
     default:
       return { color: '#6c757d', fillColor: '#6c757d' }; // Gris por defecto
   }
@@ -273,6 +301,15 @@ export default function ClientMap() {
   const [selectedRegion, setSelectedRegion] = useState<string>(''); // '' = todas
   const [selectedEstado, setSelectedEstado] = useState<string>(''); // '' = todos
   
+  // Estados para filtrado manual
+  const [filtrosActivos, setFiltrosActivos] = useState<{
+    region: string;
+    estado: string;
+  }>({
+    region: '',
+    estado: ''
+  });
+  
   // Radio configurable para búsqueda de cuadrillas (en kilómetros)
   const [searchRadius, setSearchRadius] = useState<number>(20); // 20km por defecto
   
@@ -280,6 +317,12 @@ export default function ClientMap() {
   const [totalTicketsDB, setTotalTicketsDB] = useState<number>(0);
   // Total de tickets filtrados por estado
   const [totalTicketsFiltrados, setTotalTicketsFiltrados] = useState<number>(0);
+  
+  // Estado para ticket seleccionado
+  const [selectedTicket, setSelectedTicket] = useState<TicketMapData | null>(null);
+  
+  // Estado para cuadrillas encontradas para el ticket seleccionado
+  const [cuadrillasParaTicket, setCuadrillasParaTicket] = useState<CuadrillaMapData[]>([]);
 
 
 
@@ -425,19 +468,27 @@ export default function ClientMap() {
         })) as SiteDB[];
       }
 
-      console.log(`Cargando TODOS los tickets para ${sitesRaw.length} sites disponibles (se filtrará por estado "${estadoFiltro}" en frontend)`);
+      console.log(`🔍 Cargando tickets filtrados por estado: "${estadoFiltro}" desde base de datos`);
 
-      // Cargar TODOS los tickets (el filtro por estado se aplica en el frontend)
-      const { data: ticketsRaw, error } = await supabase
+      // Filtrar tickets por estado directamente en la base de datos
+      let query = supabase
         .from('tickets_v1')
         .select('id,ticket_source,site_id,site_name,task_category,estado,created_at');
+        
+      // Solo aplicar filtro si hay un estado específico (no vacío)
+      if (estadoFiltro && estadoFiltro !== '' && estadoFiltro !== 'TODOS') {
+        query = query.eq('estado', estadoFiltro);
+        console.log(`📊 Aplicando filtro de estado en DB: estado = "${estadoFiltro}"`);
+      }
+      
+      const { data: ticketsRaw, error } = await query;
 
       if (error) {
         console.error('❌ Error cargando tickets filtrados:', error);
         throw error;
       }
 
-      console.log(`✅ Tickets cargados: ${ticketsRaw?.length || 0} tickets totales`);
+      console.log(`✅ Tickets cargados: ${ticketsRaw?.length || 0} tickets con estado "${estadoFiltro}"`);
 
       const ticketsPoints: Punto[] = [];
       const ticketsBySite = new Map<string, TicketDB[]>();
@@ -560,6 +611,41 @@ export default function ClientMap() {
       console.error('❌ Error general:', err);
       alert('Error general: ' + err);
     }
+  };
+
+  // Función para aplicar filtros manualmente
+  const aplicarFiltros = async () => {
+    console.log('🔍 [APLICAR FILTROS] Iniciando con:', { 
+      selectedRegion, 
+      selectedEstado,
+      showTickets 
+    });
+    
+    setFiltrosActivos({
+      region: selectedRegion,
+      estado: selectedEstado
+    });
+    
+    // Si hay filtro de estado y los tickets están activos, recargar tickets
+    if (selectedEstado && selectedEstado !== '' && showTickets) {
+      console.log(`🔄 [APLICAR FILTROS] Recargando tickets con estado: "${selectedEstado}"`);
+      await reloadTicketsByEstado(selectedEstado);
+    }
+    
+    console.log('✅ [APLICAR FILTROS] Filtros aplicados:', { 
+      region: selectedRegion, 
+      estado: selectedEstado 
+    });
+  };
+
+  // Función para limpiar filtros
+  const limpiarFiltros = () => {
+    setSelectedRegion('');
+    setSelectedEstado('');
+    setFiltrosActivos({
+      region: '',
+      estado: ''
+    });
   };
 
   // Funciones para manejar cambios de checkbox con carga automática
@@ -752,17 +838,16 @@ export default function ClientMap() {
   useEffect(() => {
     const loadEstados = async () => {
       try {
-        console.log('🔄 Cargando estados desde catalogo_estados...');
+        console.log('🔄 Cargando TODOS los estados desde catalogo_estados...');
         const { data, error } = await supabase
           .from('catalogo_estados')
           .select('codigo, nombre, descripcion')
-          .eq('activo', true)
           .order('codigo');
         
         if (!error && data) {
           setEstadosCatalogo(data);
-          console.log('✅ Estados del catálogo cargados:', data.length, 'estados');
-          console.log('Estados disponibles:', data.map(e => `${e.codigo}-${e.nombre}`).join(', '));
+          console.log('✅ TODOS los estados del catálogo cargados:', data.length, 'estados');
+          console.log('Estados disponibles (incluye activos e inactivos):', data.map(e => `${e.codigo}-${e.nombre}`).join(', '));
         } else {
           console.log('⚠️ Error cargando estados del catálogo, usando fallback:', error?.message);
           // Fallback con estados básicos si la tabla no existe
@@ -787,27 +872,28 @@ export default function ClientMap() {
     loadTotalTickets();
   }, []);
 
-  // Cargar total de tickets filtrados cuando cambia el estado seleccionado
+  // Solo contar tickets filtrados cuando cambia el estado seleccionado (NO recargar hasta BUSCAR)
   useEffect(() => {
     if (selectedEstado) {
       loadTicketsFiltradosPorEstado(selectedEstado);
-      // Recargar tickets si están activos (sin importar si ya estaban cargados)
-      if (showTickets) {
-        console.log(`🔄 Estado cambiado a "${selectedEstado}" - Recargando tickets...`);
-        reloadTicketsByEstado(selectedEstado);
-      }
+      console.log(`� Estado seleccionado: "${selectedEstado}" - Contando tickets (no recargando hasta BUSCAR)`);
     } else {
       // Si no hay estado seleccionado, usar el total general
       setTotalTicketsFiltrados(totalTicketsDB);
-      
-      // Si no hay estado pero los tickets están activos, limpiar tickets actuales
-      if (showTickets) {
-        console.log('🧹 No hay estado seleccionado - Limpiando tickets del mapa');
-        setTickets([]);
-        setTicketsLoaded(false);
-      }
+      console.log(`📊 Sin estado seleccionado - Usando total general: ${totalTicketsDB}`);
     }
-  }, [selectedEstado, totalTicketsDB, showTickets]);
+  }, [selectedEstado, totalTicketsDB]);
+
+  // Limpiar tickets obsoletos cuando cambian los filtros activos (hasta que se recarguen)
+  useEffect(() => {
+    console.log(`🔄 [FILTROS ACTIVOS] Cambio detectado:`, {
+      region: filtrosActivos.region,
+      estado: filtrosActivos.estado
+    });
+    
+    // No limpiar automáticamente, solo log para debug
+    // Los tickets se recargarán cuando sea necesario por aplicarFiltros()
+  }, [filtrosActivos.region, filtrosActivos.estado]);
 
   // Estados únicos para el selector (mantenemos compatibilidad)
   const estados = useMemo(() => {
@@ -820,30 +906,34 @@ export default function ClientMap() {
     const isTicket = p.tipo === 'ticket';
     
     // Filtro por región (solo si no es "TODAS")
-    if (selectedRegion && selectedRegion !== 'TODAS') {
+    if (filtrosActivos.region && filtrosActivos.region !== 'TODAS') {
       const puntoRegion = (p.region ?? '').trim();
-      const regionSeleccionada = selectedRegion.trim();
+      const regionSeleccionada = filtrosActivos.region.trim();
       if (puntoRegion !== regionSeleccionada) {
         if (isTicket) console.log(`🔍 Ticket ${p.id} rechazado por región: "${puntoRegion}" !== "${regionSeleccionada}"`);
         return false;
       }
     }
     
-    // Filtro por estado (solo aplica a tickets y si no es "TODOS" o vacío)
-    if (selectedEstado && selectedEstado !== '' && selectedEstado !== 'TODOS' && p.tipo === 'ticket') {
+    // Filtro por estado: NOTA - Los tickets ya están filtrados en la base de datos por estado
+    // Solo aplicamos filtro adicional aquí si fuera necesario para casos especiales
+    // Como ahora cargamos solo tickets del estado seleccionado, este filtro es redundante
+    if (filtrosActivos.estado && filtrosActivos.estado !== '' && filtrosActivos.estado !== 'TODOS' && p.tipo === 'ticket') {
+      console.log(`🔍 [FILTRO ESTADO] Ticket ${p.codigo} - Ya filtrado en DB por estado "${filtrosActivos.estado}"`);
+      // Los tickets ya están filtrados por estado en la DB, así que todos deberían pasar
+      // Pero mantenemos la verificación por seguridad
       const estadosDelTicket = (p.estadoTicket ?? '').split(',').map(e => e.trim());
-      const estadoSeleccionado = selectedEstado.trim();
-      console.log(`🔍 Evaluando ticket ${p.id}: estados="${p.estadoTicket}" vs seleccionado="${estadoSeleccionado}"`);
-      console.log(`🔍 Estados del ticket procesados:`, estadosDelTicket);
+      const estadoSeleccionado = filtrosActivos.estado.trim();
       
-      // Un site se muestra si tiene AL MENOS UN ticket con el estado seleccionado
       const tieneEstadoSeleccionado = estadosDelTicket.includes(estadoSeleccionado);
       
       if (!tieneEstadoSeleccionado) {
-        console.log(`🔍 Ticket ${p.id} rechazado por estado: "${estadoSeleccionado}" no encontrado en [${estadosDelTicket.join(', ')}]`);
+        console.warn(`⚠️ [FILTRO ESTADO] Inconsistencia: Ticket ${p.codigo} no debería estar aquí:`, {
+          estadosBrutos: p.estadoTicket,
+          estadosProcesados: estadosDelTicket,
+          estadoBuscado: estadoSeleccionado
+        });
         return false;
-      } else {
-        console.log(`✅ Ticket ${p.id} aceptado por estado: "${estadoSeleccionado}" encontrado en estados del site`);
       }
     }
     
@@ -861,7 +951,7 @@ export default function ClientMap() {
       console.log('Total tickets cargados:', tickets.length);
       
       // Calcular directamente los tickets visibles para debug
-      const ticketsVisibles = (selectedRegion || selectedEstado) ? tickets.filter(matchesFilters) : tickets;
+      const ticketsVisibles = (filtrosActivos.region || filtrosActivos.estado) ? tickets.filter(matchesFilters) : tickets;
       console.log('Tickets visibles después del filtro:', ticketsVisibles.length);
       
       // Mostrar todas las regiones únicas en los tickets
@@ -895,7 +985,7 @@ export default function ClientMap() {
         }
       }
     }
-  }, [selectedRegion, selectedEstado, tickets]);
+  }, [filtrosActivos.region, filtrosActivos.estado, tickets]);
 
   /* ---------- Búsqueda ---------- */
   useEffect(() => {
@@ -922,7 +1012,7 @@ export default function ClientMap() {
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [searchQuery, allPoints, selectedRegion, selectedEstado]);
+  }, [searchQuery, allPoints, filtrosActivos.region, filtrosActivos.estado]);
 
   const centerMapOnPoint = (p: Punto) => {
     setSelectedPoint(p);
@@ -930,6 +1020,118 @@ export default function ClientMap() {
     setShowSearchResults(false);
 
     if (map && p.latitud && p.longitud) map.setView([p.latitud, p.longitud], 15);
+  };
+
+  /* ---------- Funciones para selección de tickets y búsqueda de cuadrillas ---------- */
+  
+  // Función para seleccionar un ticket y buscar cuadrillas disponibles
+  const handleTicketSelection = async (ticket: TicketMapData) => {
+    setSelectedTicket(ticket);
+    limpiarRutas(); // Limpiar rutas anteriores
+    
+    console.log('🎯 Ticket seleccionado:', ticket.codigo, 'en posición:', ticket.latitud, ticket.longitud);
+    
+    if (!ticket.latitud || !ticket.longitud) {
+      console.error('❌ El ticket seleccionado no tiene coordenadas válidas');
+      setCuadrillasParaTicket([]);
+      return;
+    }
+    
+    // Buscar cuadrillas disponibles para este ticket
+    await buscarCuadrillasParaTicket(ticket);
+  };
+  
+  // Función para buscar cuadrillas disponibles para un ticket específico
+  const buscarCuadrillasParaTicket = async (ticket: TicketMapData) => {
+    console.log(`🔍 Buscando cuadrillas para ticket ${ticket.codigo}...`);
+    
+    try {
+      // Obtener todas las cuadrillas activas con sus categorías
+      const { data: cuadrillasDB, error } = await supabase
+        .from('cuadrillas_v1')
+        .select('id,codigo,nombre,latitud,longitud,activo,categoria,skill_1,skill_2,skill_3')
+        .eq('activo', true)
+        .not('latitud', 'is', null)
+        .not('longitud', 'is', null);
+      
+      if (error) {
+        console.error('❌ Error cargando cuadrillas:', error);
+        return;
+      }
+      
+      if (!cuadrillasDB || cuadrillasDB.length === 0) {
+        console.log('⚠️ No se encontraron cuadrillas activas');
+        setCuadrillasParaTicket([]);
+        return;
+      }
+      
+      // Convertir a formato de mapa
+      const cuadrillasDisponibles: CuadrillaMapData[] = cuadrillasDB.map(c => ({
+        id: c.id,
+        codigo: c.codigo,
+        nombre: c.nombre || '',
+        latitud: c.latitud!,
+        longitud: c.longitud!,
+        categoria: c.categoria as 'A' | 'B' | 'C',
+        activo: c.activo,
+        skill_1: c.skill_1,
+        skill_2: c.skill_2,
+        skill_3: c.skill_3,
+        tipo: 'cuadrilla' as const,
+        region: '' // Se puede agregar si es necesario
+      }));
+      
+      console.log(`✅ Cuadrillas encontradas: ${cuadrillasDisponibles.length}`);
+      
+      // Filtrar por skills si es necesario (basado en la categoría del ticket)
+      const cuadrillasFiltradas = filtrarCuadrillasPorCapacidad(cuadrillasDisponibles, ticket);
+      
+      setCuadrillasParaTicket(cuadrillasFiltradas);
+      
+      // Calcular rutas por categoría
+      await calcularRutasPorCategoria(
+        ticket.latitud,
+        ticket.longitud,
+        cuadrillasFiltradas.map(c => ({
+          id: c.id,
+          codigo: c.codigo,
+          nombre: c.nombre,
+          latitud: c.latitud,
+          longitud: c.longitud,
+          categoria: c.categoria || undefined
+        }))
+      );
+      
+    } catch (error) {
+      console.error('❌ Error buscando cuadrillas:', error);
+      setCuadrillasParaTicket([]);
+    }
+  };
+  
+  // Función para filtrar cuadrillas según sus capacidades/skills
+  const filtrarCuadrillasPorCapacidad = (cuadrillas: CuadrillaMapData[], ticket: TicketMapData): CuadrillaMapData[] => {
+    // Por ahora retornamos todas, pero aquí se puede implementar lógica de filtrado
+    // basada en los skills de las cuadrillas y los requerimientos del ticket
+    
+    console.log(`🔧 Evaluando ${cuadrillas.length} cuadrillas para ticket ${ticket.codigo}`);
+    
+    // Agrupar por categoría para mostrar estadísticas
+    const porCategoria = cuadrillas.reduce((acc, c) => {
+      const cat = c.categoria || 'Sin categoría';
+      acc[cat] = (acc[cat] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+    
+    console.log('📊 Cuadrillas por categoría:', porCategoria);
+    
+    return cuadrillas; // Por ahora retornamos todas
+  };
+  
+  // Función para limpiar selección de ticket
+  const limpiarSeleccionTicket = () => {
+    setSelectedTicket(null);
+    setCuadrillasParaTicket([]);
+    limpiarRutas();
   };
 
   // Totales globales (sin filtro)
@@ -945,17 +1147,17 @@ export default function ClientMap() {
 
   // Colecciones filtradas por región y estado (para mapa y contadores visibles)
   const visibleSites = useMemo(
-    () => (selectedRegion ? sites.filter(matchesFilters) : sites),
-    [sites, selectedRegion, selectedEstado]
+    () => (filtrosActivos.region ? sites.filter(matchesFilters) : sites),
+    [sites, filtrosActivos.region, filtrosActivos.estado]
   );
   const visibleCuadrillas = useMemo(() => {
     // Si hay filtro de tickets activo, SOLO mostrar cuadrillas dentro del radio configurado
-    if (selectedEstado && tickets.length > 0) {
-      console.log(`🔍 Aplicando filtro EXCLUSIVO de radio de ${searchRadius}km para cuadrillas cerca de tickets con estado: ${selectedEstado}`);
+    if (filtrosActivos.estado && tickets.length > 0) {
+      console.log(`🔍 Aplicando filtro EXCLUSIVO de radio de ${searchRadius}km para cuadrillas cerca de tickets con estado: ${filtrosActivos.estado}`);
       
       // Obtener tickets visibles (ya filtrados por estado)
       const ticketsVisibles = tickets.filter(matchesFilters);
-      console.log(`Tickets visibles con estado "${selectedEstado}": ${ticketsVisibles.length}`);
+      console.log(`Tickets visibles con estado "${filtrosActivos.estado}": ${ticketsVisibles.length}`);
       
       // SOLO mostrar cuadrillas dentro del radio configurado de cualquier ticket visible
       const cuadrillasEnRadio = cuadrillas.filter(cuadrilla => {
@@ -986,32 +1188,62 @@ export default function ClientMap() {
     }
     
     // Si NO hay filtro de tickets, aplicar filtro por región (lógica original)
-    return (selectedRegion && selectedRegion !== 'TODAS') ? cuadrillas.filter(matchesFilters) : cuadrillas;
-  }, [cuadrillas, selectedRegion, selectedEstado, tickets, searchRadius]);
+    return (filtrosActivos.region && filtrosActivos.region !== 'TODAS') ? cuadrillas.filter(matchesFilters) : cuadrillas;
+  }, [cuadrillas, filtrosActivos.region, filtrosActivos.estado, tickets, searchRadius]);
   const visibleTickets = useMemo(() => {
-    // Debug de valores exactos
-    console.log('🎫 DEBUG visibleTickets - selectedEstado:', JSON.stringify(selectedEstado), 'tipo:', typeof selectedEstado, 'length:', selectedEstado?.length);
-    console.log('🎫 DEBUG visibleTickets - selectedRegion:', JSON.stringify(selectedRegion), 'tipo:', typeof selectedRegion);
-    console.log('🎫 DEBUG visibleTickets - tickets disponibles:', tickets.length);
+    console.log('🎫 [FILTRADO TICKETS] ===== INICIANDO FILTRADO =====');
+    console.log('🎫 filtrosActivos.estado:', JSON.stringify(filtrosActivos.estado));
+    console.log('🎫 tickets totales cargados:', tickets.length);
     
-    // Solo aplicar filtros si hay valores específicos seleccionados (no "TODOS" o vacío)
-    const hasRegionFilter = selectedRegion && selectedRegion !== 'TODAS';
-    const hasEstadoFilter = selectedEstado && selectedEstado !== '' && selectedEstado !== 'TODOS';
-    
-    const result = (hasRegionFilter || hasEstadoFilter) ? tickets.filter(matchesFilters) : tickets;
-    console.log(`🎫 visibleTickets RESULTADO: ${result.length} tickets visible (región: "${selectedRegion || 'TODAS'}", estado: "${selectedEstado || 'TODOS'}")`);
-    console.log('🎫 Filtros activos:', { hasRegionFilter, hasEstadoFilter, selectedRegion, selectedEstado });
-    
-    // Debug adicional: mostrar algunos tickets de ejemplo
-    if (result.length > 0) {
-      console.log('🎫 Ejemplo de ticket visible:', result[0]);
+    // Mostrar algunos ejemplos de tickets cargados
+    if (tickets.length > 0) {
+      console.log('🎫 Ejemplo tickets cargados:', tickets.slice(0, 3).map(t => ({
+        id: t.id,
+        codigo: t.codigo,
+        estadoTicket: t.estadoTicket
+      })));
     }
-    if (tickets.length > 0 && result.length === 0) {
-      console.log('🎫 Ejemplo de ticket NO visible:', tickets[0]);
+    
+    // Solo aplicar filtros si hay valores específicos seleccionados
+    const hasRegionFilter = filtrosActivos.region && filtrosActivos.region !== 'TODAS';
+    const hasEstadoFilter = filtrosActivos.estado && filtrosActivos.estado !== '' && filtrosActivos.estado !== 'TODOS';
+    
+    console.log('🎫 Filtros activos:', { 
+      hasRegionFilter, 
+      hasEstadoFilter, 
+      regionValue: filtrosActivos.region, 
+      estadoValue: filtrosActivos.estado 
+    });
+    
+    let result: Punto[];
+    
+    if (hasRegionFilter || hasEstadoFilter) {
+      console.log('🎫 Aplicando filtros...');
+      result = tickets.filter((ticket, index) => {
+        const matches = matchesFilters(ticket);
+        if (index < 3) { // Solo log de los primeros 3 para no saturar
+          console.log(`🎫 Ticket ${ticket.codigo}: matches=${matches}, estado="${ticket.estadoTicket}"`);
+        }
+        return matches;
+      });
+    } else {
+      console.log('🎫 Sin filtros activos, mostrando todos');
+      result = tickets;
+    }
+    
+    console.log(`🎫 [RESULTADO FINAL] ${result.length} tickets visibles de ${tickets.length} totales`);
+    
+    // Mostrar tickets visibles finales
+    if (result.length > 0) {
+      console.log('🎫 Tickets visibles:', result.slice(0, 3).map(t => ({
+        id: t.id,
+        codigo: t.codigo,
+        estadoTicket: t.estadoTicket
+      })));
     }
     
     return result;
-  }, [tickets, selectedRegion, selectedEstado]);
+  }, [tickets, filtrosActivos.region, filtrosActivos.estado]);
   const visibleTotal = visibleSites.length + visibleCuadrillas.length + visibleTickets.length;
 
   return (
@@ -1178,6 +1410,112 @@ export default function ClientMap() {
             </select>
           </div>
 
+          {/* Botones de Filtrado */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              onClick={aplicarFiltros}
+              style={{
+                backgroundColor: '#007bff',
+                color: 'white',
+                border: 'none',
+                borderRadius: 6,
+                padding: '8px 16px',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'background-color 0.2s ease'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#0056b3'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#007bff'}
+            >
+              🔍 BUSCAR
+            </button>
+            <button
+              onClick={limpiarFiltros}
+              style={{
+                backgroundColor: '#dc3545',
+                color: 'white',
+                border: 'none',
+                borderRadius: 6,
+                padding: '8px 16px',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'background-color 0.2s ease'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#c82333'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#dc3545'}
+            >
+              🗑️ LIMPIAR
+            </button>
+            {/* Botón de prueba COMPUTE ROUTER */}
+            <button
+              onClick={async () => {
+                console.log('🧪 [COMPUTE ROUTER] Iniciando prueba automática...');
+                
+                // Asegurar que tickets y cuadrillas estén activos
+                if (!showTickets) {
+                  console.log('🎫 Activando tickets...');
+                  setShowTickets(true);
+                }
+                if (!showCuadrillas) {
+                  console.log('👥 Activando cuadrillas...');
+                  setShowCuadrillas(true);
+                }
+                
+                // Cargar datos si es necesario
+                if (!ticketsLoaded) {
+                  console.log('📊 Cargando tickets...');
+                  await loadTickets('NUEVO');
+                }
+                if (!cuadrillasLoaded) {
+                  console.log('📊 Cargando cuadrillas...');
+                  await loadCuadrillas();
+                }
+                
+                // Esperar un momento para que se procesen los datos
+                setTimeout(() => {
+                  const ticketsDisponibles = visibleTickets.filter(t => t.tipo === 'ticket' && t.latitud && t.longitud);
+                  
+                  if (ticketsDisponibles.length > 0) {
+                    const ticketPrueba = ticketsDisponibles[0];
+                    console.log('🎯 [COMPUTE ROUTER] Seleccionando ticket para prueba:', ticketPrueba.codigo);
+                    
+                    handleTicketSelection({
+                      id: ticketPrueba.id,
+                      codigo: ticketPrueba.codigo,
+                      nombre: ticketPrueba.nombre || '',
+                      latitud: ticketPrueba.latitud!,
+                      longitud: ticketPrueba.longitud!,
+                      region: ticketPrueba.region || '',
+                      estado: ticketPrueba.estadoTicket || '',
+                      categoria: ticketPrueba.categoria || '',
+                      tipo: 'ticket'
+                    });
+                  } else {
+                    console.warn('⚠️ No hay tickets visibles para prueba');
+                    alert('❌ No hay tickets visibles para probar.\n\n1. Activa checkbox "🎫 Tickets"\n2. Selecciona estado y presiona BUSCAR\n3. Presiona este botón nuevamente');
+                  }
+                }, 1500); // Dar más tiempo para cargar datos
+              }}
+              style={{
+                backgroundColor: '#ffc107',
+                color: '#212529',
+                border: 'none',
+                borderRadius: 6,
+                padding: '8px 12px',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'background-color 0.2s ease'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#e0a800'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ffc107'}
+            >
+              🧪 PRUEBA AUTO
+            </button>
+          </div>
+
           {/* Control de Radio de Búsqueda */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <label style={{ fontSize: 13, color: '#333', fontWeight: 600 }}>Radio (km):</label>
@@ -1258,6 +1596,25 @@ export default function ClientMap() {
 
         </div>
 
+        {/* Indicador de Filtros Activos */}
+        {(filtrosActivos.region || filtrosActivos.estado) && (
+          <div
+            style={{
+              backgroundColor: '#e7f3ff',
+              border: '1px solid #b3d9ff',
+              borderRadius: 6,
+              padding: '8px 12px',
+              fontSize: 12,
+              color: '#0056b3'
+            }}
+          >
+            <strong>🔍 Filtros Activos: </strong>
+            {filtrosActivos.region && <span>Región: {filtrosActivos.region}</span>}
+            {filtrosActivos.region && filtrosActivos.estado && <span> | </span>}
+            {filtrosActivos.estado && <span>Estado: {filtrosActivos.estado}</span>}
+          </div>
+        )}
+
         {/* Fila 2: Checkboxes, contadores y estado */}
         <div
           style={{
@@ -1309,9 +1666,9 @@ export default function ClientMap() {
             <span style={{ color: '#333', fontWeight: 500, fontSize: 13 }}>
               📡 Sites: {sitesLoaded ? `${visibleSites.length}/${totals.sites}` : loadingSites ? '⏳' : 'No cargado'} | 
               👥 Cuadrillas: {cuadrillasLoaded ? `${visibleCuadrillas.length}/${totals.cuads}` : loadingCuadrillas ? '⏳' : 'No cargado'} | 
-              🎫 Tickets: {ticketsLoaded ? `${selectedEstado ? totalTicketsFiltrados : totals.tickets}/${totals.tickets}` : loadingTickets ? '⏳' : 'No cargado'} | 
-              🔗 Total: {(selectedEstado ? totalTicketsFiltrados : totals.total)}/{totals.total}
-              {selectedEstado && showTickets && (
+              🎫 Tickets: {ticketsLoaded ? `${(filtrosActivos.region || filtrosActivos.estado) ? visibleTickets.length : totals.tickets}/${totals.tickets}` : loadingTickets ? '⏳' : 'No cargado'} | 
+              🔗 Total: {((filtrosActivos.region || filtrosActivos.estado) ? (visibleSites.length + visibleCuadrillas.length + visibleTickets.length) : totals.total)}/{totals.total}
+              {(filtrosActivos.region || filtrosActivos.estado) && showTickets && (
                 <span style={{ color: '#ff9500', fontWeight: 600 }}>
                   {' '} | 📏 Radio: {searchRadius}km
                 </span>
@@ -1351,6 +1708,186 @@ export default function ClientMap() {
           )}
         </div>
       </div>
+
+      {/* Panel de información de ticket seleccionado y cuadrillas */}
+      {selectedTicket && (
+        <div style={{
+          position: 'absolute',
+          top: 120,
+          right: 20,
+          width: 350,
+          maxHeight: '60vh',
+          overflowY: 'auto',
+          backgroundColor: 'rgba(255, 255, 255, 0.95)',
+          border: '2px solid #007bff',
+          borderRadius: 8,
+          padding: 16,
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+          zIndex: 1000
+        }}>
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            marginBottom: 12,
+            paddingBottom: 8,
+            borderBottom: '1px solid #dee2e6'
+          }}>
+            <h3 style={{ 
+              margin: 0, 
+              color: '#007bff', 
+              fontSize: 16,
+              fontWeight: 600
+            }}>
+              🎯 Ticket Seleccionado
+            </h3>
+            <button
+              onClick={limpiarSeleccionTicket}
+              style={{
+                background: '#dc3545',
+                color: 'white',
+                border: 'none',
+                borderRadius: 4,
+                padding: '4px 8px',
+                fontSize: 12,
+                cursor: 'pointer'
+              }}
+            >
+              ✖️ Cerrar
+            </button>
+          </div>
+          
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#333' }}>
+              📍 {selectedTicket.codigo} - {selectedTicket.nombre}
+            </div>
+            <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+              📌 Región: {selectedTicket.region || 'N/A'}<br/>
+              📊 Estado: {selectedTicket.estado || 'N/A'}<br/>
+              🏷️ Categoría: {selectedTicket.categoria || 'N/A'}<br/>
+              📍 Coordenadas: {selectedTicket.latitud.toFixed(6)}, {selectedTicket.longitud.toFixed(6)}
+            </div>
+          </div>
+
+          {/* Estado de cálculo de rutas */}
+          {calculandoRutas && (
+            <div style={{ 
+              textAlign: 'center', 
+              padding: 12,
+              backgroundColor: '#e3f2fd',
+              borderRadius: 4,
+              marginBottom: 12 
+            }}>
+              <div style={{ fontSize: 14, color: '#1976d2' }}>
+                🔄 Calculando rutas...
+              </div>
+            </div>
+          )}
+
+          {/* Error en cálculo de rutas */}
+          {errorRutas && (
+            <div style={{ 
+              padding: 12,
+              backgroundColor: '#ffebee',
+              borderRadius: 4,
+              marginBottom: 12,
+              color: '#d32f2f',
+              fontSize: 12
+            }}>
+              ❌ Error: {errorRutas}
+            </div>
+          )}
+
+          {/* Cuadrillas encontradas */}
+          <div>
+            <h4 style={{ 
+              margin: '0 0 8px 0', 
+              color: '#6f42c1', 
+              fontSize: 14,
+              fontWeight: 600
+            }}>
+              👥 Cuadrillas Disponibles ({cuadrillasParaTicket.length})
+            </h4>
+            
+            {cuadrillasParaTicket.length === 0 ? (
+              <div style={{ 
+                padding: 12, 
+                textAlign: 'center', 
+                color: '#666',
+                backgroundColor: '#f8f9fa',
+                borderRadius: 4,
+                fontSize: 12
+              }}>
+                No hay cuadrillas disponibles
+              </div>
+            ) : (
+              <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                {cuadrillasParaTicket.map(cuadrilla => (
+                  <div 
+                    key={cuadrilla.id}
+                    style={{
+                      padding: 8,
+                      marginBottom: 6,
+                      backgroundColor: '#f8f9fa',
+                      borderRadius: 4,
+                      borderLeft: `4px solid ${getCategoriaColors(cuadrilla.categoria).fillColor}`,
+                      fontSize: 12
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, color: '#333' }}>
+                      {cuadrilla.codigo} - {cuadrilla.nombre}
+                    </div>
+                    <div style={{ color: '#666', fontSize: 11 }}>
+                      Categoría: {cuadrilla.categoria || 'N/A'} | 
+                      Activo: {cuadrilla.activo ? '✅' : '❌'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Resultados de rutas por categoría */}
+          {rutasPorCategoria && rutasPorCategoria.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <h4 style={{ 
+                margin: '0 0 8px 0', 
+                color: '#28a745', 
+                fontSize: 14,
+                fontWeight: 600
+              }}>
+                🛣️ Mejores Rutas por Categoría
+              </h4>
+              
+              {rutasPorCategoria.map((ruta, index) => (
+                <div 
+                  key={index}
+                  style={{
+                    padding: 10,
+                    marginBottom: 8,
+                    backgroundColor: getCategoriaColors(ruta.categoria as 'A' | 'B' | 'C' | null | undefined).fillColor + '15',
+                    borderRadius: 4,
+                    borderLeft: `4px solid ${getCategoriaColors(ruta.categoria as 'A' | 'B' | 'C' | null | undefined).fillColor}`,
+                    fontSize: 12
+                  }}
+                >
+                  <div style={{ 
+                    fontWeight: 600, 
+                    color: '#333',
+                    marginBottom: 4
+                  }}>
+                    Categoría {ruta.categoria}: {ruta.cuadrillaCodigo}
+                  </div>
+                  <div style={{ color: '#666', fontSize: 11 }}>
+                    ⏱️ Tiempo: {ruta.tiempoConTrafico.toFixed(1)} min<br/>
+                    📏 Distancia: {ruta.distanciaKm.toFixed(2)} km
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Mapa */}
       <MapContainer
@@ -1400,93 +1937,92 @@ export default function ClientMap() {
 
         {/* Cuadrillas (datos reales actualizados cada 3 segundos) */}
         {showCuadrillas &&
-          visibleCuadrillas.map((c) => {
-            if (!c.latitud || !c.longitud) return null;
-            const isSelected =
-              selectedPoint?.codigo === c.codigo && selectedPoint.tipo === 'cuadrilla';
-            
-            // Resaltar específicamente la cuadrilla ID=20
-            const isCuadrilla20 = c.id === 20;
-            
-            // Si hay filtro de tickets activo, todas las cuadrillas visibles están dentro del radio
-            const isWithinRadius = selectedEstado && tickets.length > 0;
-            
-            // Obtener colores basados en categoría
-            const categoriaColors = getCategoriaColors(c.categoriaCuadrilla);
-            
-            // Debug: verificar categorías
-            if (Number(c.id) <= 5) { // Solo mostrar para las primeras 5 cuadrillas para no saturar logs
-              console.log(`Cuadrilla ${c.codigo} (ID: ${c.id}): categoria=${c.categoriaCuadrilla}, colors=`, categoriaColors);
-            }
-            
-            return (
-              <CircleMarker
-                key={`cuad-${c.codigo}`}
-                center={[c.latitud, c.longitud]}
-                radius={isCuadrilla20 ? 12 : (isSelected ? 10 : (isWithinRadius ? 8 : 5))}
-                pathOptions={{
-                  // SIEMPRE usar colores por categoría, excepto casos especiales
-                  color: isCuadrilla20 ? '#ff6b00' : (isSelected ? '#ff0000' : categoriaColors.color),
-                  fillColor: isCuadrilla20 ? '#ffa500' : (isSelected ? '#ffff00' : categoriaColors.fillColor),
-                  // Borde más grueso cuando está dentro del radio para indicar que está activo
-                  weight: isCuadrilla20 ? 4 : (isSelected ? 3 : (isWithinRadius ? 4 : 2)),
-                  // Mayor opacidad cuando está dentro del radio
-                  fillOpacity: isCuadrilla20 ? 0.9 : (isWithinRadius ? 0.9 : 0.7),
-                }}
-                eventHandlers={{ click: () => centerMapOnPoint(c) }}
-              >
-                <Popup>
-                  <b>{isCuadrilla20 ? '⭐ CUADRILLA ESPECIAL' : '👥 CUADRILLA'}</b>
-                  <br />
-                  Código: {c.codigo}
-                  <br />
-                  ID: {c.id}
-                  <br />
-                  Nombre: {c.nombre}
-                  <br />
-                  Zona: {c.region}
-                  <br />
-                  Supervisor: {c.supervisor || 'No asignado'}
-                  <br />
-                  Teléfono: {c.telefono || 'No disponible'}
-                  <br />
-                  Estado: {c.activo ? 'Activo' : 'Inactivo'}
-                  <br />
-                  <b>� Tipo: {c.tipoCuadrilla || 'No definido'}</b>
-                  <br />
-                  <b>�🛠️ Skills:</b>
-                  <br />
-                  • Skill 1: {(c.skill_1 && c.skill_1.trim()) ? c.skill_1.trim() : 'No definido'}
-                  <br />
-                  • Skill 2: {(c.skill_2 && c.skill_2.trim()) ? c.skill_2.trim() : 'No definido'}
-                  <br />
-                  • Skill 3: {(c.skill_3 && c.skill_3.trim()) ? c.skill_3.trim() : 'No definido'}
-                  <br />
-                  <b>🏷️ Categoría: {c.categoriaCuadrilla || 'No definida'}</b>
-                  <br />
-                  • Skill 3: {(c.skill_3 && c.skill_3.trim()) ? c.skill_3.trim() : 'No definido'}
-                  <br />
-                  📍 Coordenadas: {c.latitud}, {c.longitud}
-                  {isCuadrilla20 && (
-                    <>
-                      <br />
-                      <span style={{ color: '#ff6b00', fontWeight: 'bold' }}>
-                        🌟 CUADRILLA RESALTADA
-                      </span>
-                    </>
-                  )}
-                  {isWithinRadius && (
-                    <>
-                      <br />
-                      <span style={{ color: '#ff9500', fontWeight: 'bold' }}>
-                        🎯 DENTRO DE RADIO {searchRadius}KM
-                      </span>
-                    </>
-                  )}
-                </Popup>
-              </CircleMarker>
-            );
-          })}
+          visibleCuadrillas
+            .filter(c => c.latitud !== null && c.longitud !== null && typeof c.latitud === 'number' && typeof c.longitud === 'number')
+            .map((c) => {
+              const isSelected =
+                selectedPoint?.codigo === c.codigo && selectedPoint.tipo === 'cuadrilla';
+              
+              // Resaltar específicamente la cuadrilla ID=20
+              const isCuadrilla20 = c.id === 20;
+              
+              // Si hay filtro de tickets activo, todas las cuadrillas visibles están dentro del radio
+              const isWithinRadius = selectedEstado && tickets.length > 0;
+              
+              // Obtener colores basados en categoría
+              const categoriaColors = getCategoriaColors(c.categoriaCuadrilla);
+              
+              // Debug: verificar categorías
+              if (Number(c.id) <= 5) { // Solo mostrar para las primeras 5 cuadrillas para no saturar logs
+                console.log(`Cuadrilla ${c.codigo} (ID: ${c.id}): categoria=${c.categoriaCuadrilla}, colors=`, categoriaColors);
+              }
+              
+              return (
+                <CircleMarker
+                  key={`cuad-${c.codigo}`}
+                  center={[c.latitud!, c.longitud!]}
+                  radius={isCuadrilla20 ? 12 : (isSelected ? 10 : (isWithinRadius ? 8 : 5))}
+                  pathOptions={{
+                    // SIEMPRE usar colores por categoría, excepto casos especiales
+                    color: isCuadrilla20 ? '#ff6b00' : (isSelected ? '#ff0000' : categoriaColors.color),
+                    fillColor: isCuadrilla20 ? '#ffa500' : (isSelected ? '#ffff00' : categoriaColors.fillColor),
+                    // Borde más grueso cuando está dentro del radio para indicar que está activo
+                    weight: isCuadrilla20 ? 4 : (isSelected ? 3 : (isWithinRadius ? 4 : 2)),
+                    // Mayor opacidad cuando está dentro del radio
+                    fillOpacity: isCuadrilla20 ? 0.9 : (isWithinRadius ? 0.9 : 0.7),
+                  }}
+                  eventHandlers={{ click: () => centerMapOnPoint(c) }}
+                >
+                  <Popup>
+                    <b>{isCuadrilla20 ? '⭐ CUADRILLA ESPECIAL' : '👥 CUADRILLA'}</b>
+                    <br />
+                    Código: {c.codigo}
+                    <br />
+                    ID: {c.id}
+                    <br />
+                    Nombre: {c.nombre}
+                    <br />
+                    Zona: {c.region}
+                    <br />
+                    Supervisor: {c.supervisor || 'No asignado'}
+                    <br />
+                    Teléfono: {c.telefono || 'No disponible'}
+                    <br />
+                    Estado: {c.activo ? 'Activo' : 'Inactivo'}
+                    <br />
+                    <b>🔧 Tipo: {c.tipoCuadrilla || 'No definido'}</b>
+                    <br />
+                    <b>🛠️ Skills:</b>
+                    <br />
+                    • Skill 1: {(c.skill_1 && c.skill_1.trim()) ? c.skill_1.trim() : 'No definido'}
+                    <br />
+                    • Skill 2: {(c.skill_2 && c.skill_2.trim()) ? c.skill_2.trim() : 'No definido'}
+                    <br />
+                    • Skill 3: {(c.skill_3 && c.skill_3.trim()) ? c.skill_3.trim() : 'No definido'}
+                    <br />
+                    <b>🏷️ Categoría: {c.categoriaCuadrilla || 'No definida'}</b>
+                    <br />
+                    📍 Coordenadas: {c.latitud}, {c.longitud}
+                    {isCuadrilla20 && (
+                      <>
+                        <br />
+                        <span style={{ color: '#ff6b00', fontWeight: 'bold' }}>
+                          🌟 CUADRILLA RESALTADA
+                        </span>
+                      </>
+                    )}
+                    {isWithinRadius && (
+                      <>
+                        <br />
+                        <span style={{ color: '#ff9500', fontWeight: 'bold' }}>
+                          🎯 DENTRO DE RADIO {searchRadius}KM
+                        </span>
+                      </>
+                    )}
+                  </Popup>
+                </CircleMarker>
+              );
+            })}
 
         {/* Tickets */}
         {showTickets &&
@@ -1506,7 +2042,32 @@ export default function ClientMap() {
                   fillOpacity: 0.8,
                   opacity: 1,
                 }}
-                eventHandlers={{ click: () => centerMapOnPoint(t) }}
+                eventHandlers={{ 
+                  click: () => {
+                    centerMapOnPoint(t);
+                    
+                    // Asegurar que cuadrillas estén activas para mostrar las rutas
+                    if (!showCuadrillas) {
+                      setShowCuadrillas(true);
+                      if (!cuadrillasLoaded) {
+                        loadCuadrillas();
+                      }
+                    }
+                    
+                    // Manejar selección de ticket para búsqueda de cuadrillas
+                    handleTicketSelection({
+                      id: t.id,
+                      codigo: t.codigo,
+                      nombre: t.nombre || '',
+                      latitud: t.latitud!,
+                      longitud: t.longitud!,
+                      region: t.region || '',
+                      estado: t.estadoTicket || '',
+                      categoria: t.categoria || '',
+                      tipo: 'ticket'
+                    });
+                  } 
+                }}
               >
                 <Popup>
                   <div>
@@ -1534,7 +2095,8 @@ export default function ClientMap() {
                             const cuadrillasEnRango = visibleCuadrillas.filter(c => 
                               c.latitud && c.longitud && c.activo !== false &&
                               c.tipo === 'cuadrilla' &&
-                              calculateDistance(t.latitud, t.longitud, c.latitud!, c.longitud!) <= searchRadius
+                              t.latitud && t.longitud &&
+                              calculateDistance(t.latitud, t.longitud, c.latitud, c.longitud) <= searchRadius
                             ).map(c => ({
                               id: c.id as number,
                               codigo: c.codigo,
@@ -1595,13 +2157,15 @@ export default function ClientMap() {
                       }}>
                         <strong>Cuadrillas en rango ({visibleCuadrillas.filter(c => 
                           c.tipo === 'cuadrilla' && 
-                          calculateDistance(t.latitud, t.longitud, c.latitud!, c.longitud!) <= searchRadius
+                          t.latitud !== null && t.longitud !== null && c.latitud !== null && c.longitud !== null &&
+                          calculateDistance(t.latitud, t.longitud, c.latitud, c.longitud) <= searchRadius
                         ).length}):</strong>
                         <div style={{ marginTop: 2 }}>
                           {(() => {
                             const cuadrillasEnRangoLocal = visibleCuadrillas.filter(c => 
                               c.tipo === 'cuadrilla' && 
-                              calculateDistance(t.latitud, t.longitud, c.latitud!, c.longitud!) <= searchRadius
+                              t.latitud !== null && t.longitud !== null && c.latitud !== null && c.longitud !== null &&
+                              calculateDistance(t.latitud, t.longitud, c.latitud, c.longitud) <= searchRadius
                             );
                             const categoriaCount = cuadrillasEnRangoLocal.reduce((acc, c, index) => {
                               let categoria = (c as any).categoriaCuadrilla;
@@ -1711,19 +2275,31 @@ export default function ClientMap() {
           const cuadrilla = visibleCuadrillas.find(c => c.id === rutaCategoria.cuadrillaId);
           if (!cuadrilla || !cuadrilla.latitud || !cuadrilla.longitud) return null;
 
-          // Obtener el primer ticket visible para la ruta
-          const ticketsVisibles = visibleTickets.filter(t => t.tipo === 'ticket');
-          const ticket = ticketsVisibles[0]; // Usar el primer ticket visible
+          // Usar el ticket seleccionado o el primer ticket visible
+          let ticket = selectedTicket;
+          if (!ticket) {
+            const ticketsVisibles = visibleTickets.filter(t => t.tipo === 'ticket');
+            const puntoTicket = ticketsVisibles[0];
+            if (puntoTicket) {
+              ticket = {
+                id: puntoTicket.id,
+                codigo: puntoTicket.codigo,
+                nombre: puntoTicket.nombre || '',
+                latitud: puntoTicket.latitud!,
+                longitud: puntoTicket.longitud!,
+                region: puntoTicket.region || undefined,
+                estado: puntoTicket.estadoTicket || undefined,
+                categoria: puntoTicket.categoria || undefined,
+                tipo: 'ticket'
+              };
+            }
+          }
           if (!ticket || !ticket.latitud || !ticket.longitud) return null;
 
           return (
-            <DirectRoute
-              key={`direct-route-${rutaCategoria.categoria}-${index}`}
-              start={[cuadrilla.latitud, cuadrilla.longitud]}
-              end={[ticket.latitud, ticket.longitud]}
-              color={rutaCategoria.color}
-              categoria={rutaCategoria.categoria}
-              cuadrillaName={cuadrilla.nombre}
+            <ComputedRoute
+              key={`computed-route-${rutaCategoria.categoria}-${index}`}
+              routeData={rutaCategoria}
             />
           );
         })}

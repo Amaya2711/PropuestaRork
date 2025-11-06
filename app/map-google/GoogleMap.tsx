@@ -71,6 +71,13 @@ export default function GoogleMap() {
   const [loadingCuadrillas, setLoadingCuadrillas] = useState(false);
   const [loadingTickets, setLoadingTickets] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [apiKeyError, setApiKeyError] = useState(false);
+
+  // Debug de variables de entorno
+  console.log('🔍 INIT: Verificando variables de entorno al cargar componente');
+  console.log('API Key presente:', !!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
+  console.log('API Key valor:', process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.substring(0, 10) + '...');
+  console.log('Supabase URL presente:', !!process.env.NEXT_PUBLIC_SUPABASE_URL);
   
   // Estados loaded
   const [sitesLoaded, setSitesLoaded] = useState(false);
@@ -109,9 +116,12 @@ export default function GoogleMap() {
     const initializeGoogleMaps = async () => {
       try {
         console.log('🔄 Inicializando Google Maps...');
+        console.log('🔍 Verificando API Key:', process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ? 'Encontrada' : 'No encontrada');
         
         if (!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) {
           console.error('❌ Google Maps API Key no encontrada en variables de entorno');
+          console.error('📋 Variables disponibles:', Object.keys(process.env).filter(key => key.includes('GOOGLE')));
+          setApiKeyError(true);
           return;
         }
         
@@ -1871,7 +1881,30 @@ export default function GoogleMap() {
           height: '100%',
           paddingTop: 200 // Espacio para el panel de control
         }}
-      />
+      >
+        {apiKeyError && (
+          <div style={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            height: '50%',
+            backgroundColor: '#fff3cd',
+            border: '1px solid #ffeaa7',
+            borderRadius: 8,
+            margin: 20,
+            padding: 20,
+            flexDirection: 'column'
+          }}>
+            <h3 style={{ color: '#856404', marginBottom: 16 }}>⚠️ Error de Configuración</h3>
+            <p style={{ color: '#856404', textAlign: 'center', marginBottom: 16 }}>
+              No se pudo cargar Google Maps. La API Key no está configurada correctamente.
+            </p>
+            <div style={{ backgroundColor: '#f8f9fa', padding: 12, borderRadius: 4, fontSize: 14, color: '#6c757d' }}>
+              <strong>Para desarrolladores:</strong> Verificar que NEXT_PUBLIC_GOOGLE_MAPS_API_KEY esté definida en .env.local
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Panel de Resultados de Rutas */}
       {selectedTicket && routeResults.length > 0 && (

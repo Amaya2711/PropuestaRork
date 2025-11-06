@@ -76,8 +76,9 @@ export default function GoogleMap() {
   // Debug de variables de entorno
   console.log('🔍 INIT: Verificando variables de entorno al cargar componente');
   console.log('API Key presente:', !!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
-  console.log('API Key valor:', process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.substring(0, 10) + '...');
+  console.log('API Key valor:', process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.substring(0, 15) + '...');
   console.log('Supabase URL presente:', !!process.env.NEXT_PUBLIC_SUPABASE_URL);
+  console.log('🔍 TODAS las variables NEXT_PUBLIC:', Object.keys(process.env).filter(key => key.startsWith('NEXT_PUBLIC')));
   
   // Estados loaded
   const [sitesLoaded, setSitesLoaded] = useState(false);

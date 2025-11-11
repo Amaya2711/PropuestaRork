@@ -274,7 +274,10 @@ async function fetchAll<T>(table: string, select: string, whereClause?: { column
 
 /* ===================== Página ===================== */
 export default function ClientMap({ ticketId }: { ticketId?: string }) {
+  console.log('🔵 ClientMap montado con ticketId:', ticketId);
+  
   const [map, setMap] = useState<any>(null);
+  const [ticketLoaded, setTicketLoaded] = useState(false);
   const [sites, setSites] = useState<Punto[]>([]);
   const [cuadrillas, setCuadrillas] = useState<Punto[]>([]);
   const [tickets, setTickets] = useState<Punto[]>([]);
@@ -1016,11 +1019,25 @@ export default function ClientMap({ ticketId }: { ticketId?: string }) {
 
   // useEffect para cargar automáticamente un ticket específico cuando se pasa ticketId por URL
   useEffect(() => {
-    if (!ticketId) return;
+    console.log('🔄 useEffect ejecutado - ticketId:', ticketId, 'map:', !!map, 'ticketLoaded:', ticketLoaded);
+    
+    if (!ticketId) {
+      console.log('⚠️ No hay ticketId, saliendo...');
+      return;
+    }
+    
+    if (ticketLoaded) {
+      console.log('✅ Ticket ya fue cargado previamente, saliendo...');
+      return;
+    }
+    
     if (!map) {
       console.log('⏳ Esperando a que el mapa esté listo para cargar el ticket...');
       return;
     }
+    
+    console.log('✅ Mapa disponible, iniciando carga del ticket...');
+    setTicketLoaded(true);
     
     const loadSpecificTicket = async () => {
       console.log(`🎯 Cargando ticket específico con ID: ${ticketId}`);
@@ -1105,10 +1122,10 @@ export default function ClientMap({ ticketId }: { ticketId?: string }) {
       }
     };
     
-    // Dar tiempo a que el mapa se inicialice completamente
+    // Ejecutar la carga con un pequeño delay para asegurar que el mapa esté renderizado
     const timer = setTimeout(() => {
       loadSpecificTicket();
-    }, 500);
+    }, 1000);
     
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2126,14 +2143,15 @@ export default function ClientMap({ ticketId }: { ticketId?: string }) {
 
         {/* Tickets */}
         {showTickets &&
-          visibleTickets.map((t) => {
-            if (!t.latitud || !t.longitud) return null;
-            const isSelected =
-              selectedPoint?.id === t.id && selectedPoint.tipo === 'ticket';
-            return (
+          visibleTickets
+            .filter((t) => t.latitud !== null && t.longitud !== null)
+            .map((t) => {
+              const isSelected =
+                selectedPoint?.id === t.id && selectedPoint.tipo === 'ticket';
+              return (
               <CircleMarker
                 key={t.id}
-                center={[t.latitud, t.longitud]}
+                center={[t.latitud!, t.longitud!]}
                 radius={isSelected ? 14 : 8}
                 pathOptions={{
                   color: isSelected ? '#ff0000' : '#8b0000',

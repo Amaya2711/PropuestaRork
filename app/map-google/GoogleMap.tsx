@@ -462,7 +462,13 @@ export default function GoogleMap() {
 
     // Configurar intervalo para registrar cada 5 segundos
     rutaIntervalRef.current = setInterval(() => {
-      registrarUbicacionRuta(cuadrilla);
+      // Buscar la cuadrilla actualizada del estado para obtener coordenadas más recientes
+      const cuadrillaActualizada = cuadrillas.find(c => c.id === cuadrilla.id);
+      if (cuadrillaActualizada) {
+        registrarUbicacionRuta(cuadrillaActualizada);
+      } else {
+        registrarUbicacionRuta(cuadrilla);
+      }
     }, 5000);
 
     console.log(`⏱️ Tracking iniciado: registrando ubicación cada 5 segundos`);

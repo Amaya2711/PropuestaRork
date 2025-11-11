@@ -273,7 +273,7 @@ async function fetchAll<T>(table: string, select: string, whereClause?: { column
 }
 
 /* ===================== Página ===================== */
-export default function ClientMap() {
+export default function ClientMap({ ticketId }: { ticketId?: string }) {
   const [map, setMap] = useState<any>(null);
   const [sites, setSites] = useState<Punto[]>([]);
   const [cuadrillas, setCuadrillas] = useState<Punto[]>([]);
@@ -1013,6 +1013,106 @@ export default function ClientMap() {
 
     return () => clearTimeout(timer);
   }, [searchQuery, allPoints, filtrosActivos.region, filtrosActivos.estado]);
+
+  // useEffect para cargar automáticamente un ticket específico cuando se pasa ticketId por URL
+  useEffect(() => {
+    if (!ticketId) return;
+    if (!map) {
+      console.log('⏳ Esperando a que el mapa esté listo para cargar el ticket...');
+      return;
+    }
+    
+    const loadSpecificTicket = async () => {
+      console.log(`🎯 Cargando ticket específico con ID: ${ticketId}`);
+      
+      try {
+        // Cargar el ticket desde la base de datos
+        const { data: ticketData, error: ticketError } = await supabase
+          .from('tickets_v1')
+          .select('id,ticket_source,site_id,site_name,task_category,estado,created_at')
+          .eq('id', ticketId)
+          .single();
+        
+        if (ticketError || !ticketData) {
+          console.error('❌ Error cargando ticket:', ticketError);
+          alert('No se pudo cargar el ticket. Verifica que el ID sea correcto.');
+          return;
+        }
+        
+        console.log('📋 Ticket encontrado:', ticketData);
+        console.log('🔍 Buscando site con código:', ticketData.site_id);
+        
+        // Obtener las coordenadas del site asociado al ticket
+        const { data: siteData, error: siteError } = await supabase
+          .from('sites_v1')
+          .select('latitud,longitud,region')
+          .eq('codigo', ticketData.site_id)
+          .single();
+        
+        if (siteError || !siteData) {
+          console.error('❌ Error cargando site:', siteError);
+          alert(`No se encontró el site ${ticketData.site_id} en la base de datos.`);
+          return;
+        }
+        
+        if (!siteData.latitud || !siteData.longitud) {
+          console.error('❌ El site no tiene coordenadas:', siteData);
+          alert(`El site ${ticketData.site_id} no tiene coordenadas registradas.`);
+          return;
+        }
+        
+        console.log('📍 Coordenadas del site:', siteData.latitud, siteData.longitud);
+        
+        // Crear el objeto TicketMapData
+        const ticketMapData: TicketMapData = {
+          id: ticketData.id,
+          codigo: ticketData.ticket_source || ticketData.id,
+          nombre: ticketData.site_name || ticketData.site_id || 'Sin nombre',
+          latitud: siteData.latitud,
+          longitud: siteData.longitud,
+          region: siteData.region,
+          estado: ticketData.estado || undefined,
+          categoria: ticketData.task_category || undefined,
+          tipo: 'ticket'
+        };
+        
+        console.log('✅ Ticket cargado con coordenadas:', ticketMapData.latitud, ticketMapData.longitud);
+        
+        // Mostrar cuadrillas automáticamente
+        if (!cuadrillasLoaded) {
+          console.log('📍 Cargando cuadrillas...');
+          setShowCuadrillas(true);
+          await loadCuadrillas();
+        } else {
+          setShowCuadrillas(true);
+        }
+        
+        // Seleccionar el ticket automáticamente (esto también buscará cuadrillas cercanas)
+        console.log('🎯 Seleccionando ticket y buscando cuadrillas cercanas...');
+        await handleTicketSelection(ticketMapData);
+        
+        // Centrar el mapa en el ticket DESPUÉS de cargar todo
+        setTimeout(() => {
+          console.log('🗺️ Centrando mapa en:', ticketMapData.latitud, ticketMapData.longitud);
+          if (map) {
+            map.setView([ticketMapData.latitud, ticketMapData.longitud], 14);
+          }
+        }, 800);
+        
+      } catch (error) {
+        console.error('❌ Error cargando ticket específico:', error);
+        alert('Error al cargar el ticket. Revisa la consola para más detalles.');
+      }
+    };
+    
+    // Dar tiempo a que el mapa se inicialice completamente
+    const timer = setTimeout(() => {
+      loadSpecificTicket();
+    }, 500);
+    
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticketId, map]); // Solo ejecutar cuando cambie ticketId o map esté disponible
 
   const centerMapOnPoint = (p: Punto) => {
     setSelectedPoint(p);

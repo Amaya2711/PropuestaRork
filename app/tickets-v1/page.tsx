@@ -53,9 +53,9 @@ export default function TicketsV1Page() {
   async function loadEstados() {
     try {
       const { data, error } = await supabase
-        .from('CATALOGO_ESTADOS')
-        .select('id, codigo, nombre')
-        .order('id');
+        .from('catalogo_estados')
+        .select('id, nombre')
+        .order('nombre');
       
       if (error) {
         console.error('Error cargando estados:', error);
@@ -249,7 +249,7 @@ export default function TicketsV1Page() {
               setSelectedEstado(e.target.value);
             }}
             style={{
-              padding: '8px 12px',
+              padding: '6px 12px',
               border: '1px solid #ced4da',
               borderRadius: '4px',
               fontSize: '14px',
@@ -258,7 +258,7 @@ export default function TicketsV1Page() {
               minWidth: '150px'
             }}
           >
-            <option value="">Todos los estados</option>
+            <option value="">Todas</option>
             {estados.map((estado) => (
               <option key={estado.id} value={estado.nombre}>
                 {estado.nombre}
@@ -304,8 +304,8 @@ export default function TicketsV1Page() {
             <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', borderRadius: '8px', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
               <thead>
                 <tr style={{ backgroundColor: '#007bff', color: 'white' }}>
-                  {['Ticket', 'Site', 'Nivel', 'Categoría', 'Subcategoría', 'Estado', 'Creado', 'Acciones'].map((h) => (
-                    <th key={h} style={{ padding: '15px', textAlign: h === 'Acciones' ? 'center' : 'left', fontWeight: 'bold' }}>
+                  {['Ticket', 'Site', 'Nivel', 'Categoría', 'Subcategoría', 'Estado', 'Creado', 'Mapa', 'Acciones'].map((h) => (
+                    <th key={h} style={{ padding: '15px', textAlign: (h === 'Acciones' || h === 'Mapa') ? 'center' : 'left', fontWeight: 'bold' }}>
                       {h}
                     </th>
                   ))}
@@ -345,6 +345,22 @@ export default function TicketsV1Page() {
                       </span>
                     </td>
                     <td style={{ padding: '12px', color: '#666' }}>{formatDateTime(t.created_at)}</td>
+                    <td style={{ padding: '12px', textAlign: 'center' }}>
+                      <Link 
+                        href={`/map?ticket=${t.id}`} 
+                        style={{ 
+                          padding: '6px 12px', 
+                          backgroundColor: '#28a745', 
+                          color: 'white', 
+                          textDecoration: 'none', 
+                          borderRadius: '4px', 
+                          fontSize: '12px',
+                          display: 'inline-block'
+                        }}
+                      >
+                        MAPA
+                      </Link>
+                    </td>
                     <td style={{ padding: '12px', textAlign: 'center' }}>
                       {t.estado?.toLowerCase().trim() === 'resuelto' ? (
                         <span 

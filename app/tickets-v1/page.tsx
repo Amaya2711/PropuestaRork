@@ -54,15 +54,19 @@ export default function TicketsV1Page() {
     try {
       const { data, error } = await supabase
         .from('catalogo_estados')
-        .select('id, nombre')
+        .select('id, codigo, nombre')
         .order('nombre');
       
       if (error) {
         console.error('Error cargando estados:', error);
         return;
       }
-      
-      setEstados(data || []);
+      // Mapear para asegurar que cada estado tiene id, codigo y nombre
+      setEstados((data || []).map((row: any) => ({
+        id: row.id,
+        codigo: row.codigo,
+        nombre: row.nombre
+      })));
     } catch (error) {
       console.error('Error cargando estados:', error);
     }

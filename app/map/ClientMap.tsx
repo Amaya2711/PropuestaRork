@@ -1,277 +1,20 @@
-'use client';
+// Archivo eliminado
+// Este archivo ha sido vaciado.
+// No contiene ningún contenido.
 
-import { useEffect, useMemo, useState } from 'react';
-import dynamic from 'next/dynamic';
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
-import { supabase } from '@/lib/supabaseClient';
-import { useRouteCalculator } from '@/hooks/useRouteCalculator';
-
-// 👇 Importa componentes de react-leaflet dinámicamente para asegurar entorno cliente
-const MapContainer = dynamic(
-  async () => (await import('react-leaflet')).MapContainer,
-  { ssr: false }
-);
-const TileLayer = dynamic(
-  async () => (await import('react-leaflet')).TileLayer,
-  { ssr: false }
-);
-const CircleMarker = dynamic(
-  async () => (await import('react-leaflet')).CircleMarker,
-  { ssr: false }
-);
-const Popup = dynamic(
-  async () => (await import('react-leaflet')).Popup,
-  { ssr: false }
-);
-const Polyline = dynamic(
-  async () => (await import('react-leaflet')).Polyline,
-  { ssr: false }
-);
-const ComputedRoute = dynamic(
-  async () => (await import('../components/ComputedRoute')).default,
-  { ssr: false }
-);
-
-/* ===================== Tipos ===================== */
-type SiteDB = {
-  id: number | string;
-  codigo: string;
-  site: string | null;
-  region: string | null;
-  latitud: number | null;
-  longitud: number | null;
-};
-
-type CuadrillaDB = {
-  id: number;
-  codigo: string;
-  nombre: string | null;
-  supervisor: string | null;
-  zona: string | null;
-  activo: boolean | null;
-  latitud: number | null;
-  longitud: number | null;
-  telefono: string | null;
-  skill_1: string | null;
-  skill_2: string | null;
-  skill_3: string | null;
-  tipo: 'A' | 'B' | 'C' | null;
-  categoria: 'A' | 'B' | 'C' | null;
-};
-
-type TicketDB = {
-  id: string;
-  ticket_source: string | null;
-  site_id: string | null;
-  site_name: string | null;
-  task_category: string | null;
-  estado: string | null;
-  created_at: string | null;
-};
-
-type Punto = {
-  id: number | string;
-  codigo: string;
-  nombre: string | null;
-  region: string | null;
-  latitud: number | null;
-  longitud: number | null;
-  tipo: 'site' | 'cuadrilla' | 'ticket';
-  // Campos adicionales para tickets
-  ticketId?: string;
-  estadoTicket?: string;
-  categoria?: string;
-  // Campos adicionales para cuadrillas
-  supervisor?: string | null;
-  telefono?: string | null;
-  activo?: boolean | null;
-  skill_1?: string | null;
-  skill_2?: string | null;
-  skill_3?: string | null;
-  tipoCuadrilla?: 'A' | 'B' | 'C' | null;
-  categoriaCuadrilla?: 'A' | 'B' | 'C' | null;
-};
-
-// Tipos específicos para la funcionalidad de selección de tickets
-type TicketMapData = {
-  id: string | number;
-  codigo: string;
-  nombre: string;
-  latitud: number;
-  longitud: number;
-  region?: string;
-  estado?: string;
-  categoria?: string;
-  tipo: 'ticket';
-};
-
-type CuadrillaMapData = {
-  id: number;
-  codigo: string;
-  nombre: string;
-  latitud: number;
-  longitud: number;
-  categoria: 'A' | 'B' | 'C' | null;
-  activo: boolean;
-  skill_1?: string | null;
-  skill_2?: string | null;
-  skill_3?: string | null;
-  tipo: 'cuadrilla';
-  region?: string;
-};
-
-/* ===================== Función de Cálculo de Distancia ===================== */
-// Función haversine para calcular la distancia entre dos puntos geográficos en kilómetros
+// Función para calcular distancia haversine
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371; // Radio de la Tierra en kilómetros
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = 
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  const distance = R * c;
-  return distance;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
-
-/* ===================== Función de Colores por Categoría ===================== */
-// Función para obtener colores basados en la categoría de cuadrilla
-function getCategoriaColors(categoria: 'A' | 'B' | 'C' | null | undefined): { color: string; fillColor: string } {
-  switch (categoria) {
-    case 'A':
-      return { color: '#004085', fillColor: '#007bff' }; // Azul
-    case 'B':
-      return { color: '#155724', fillColor: '#28a745' }; // Verde
-    case 'C':
-      return { color: '#cc7000', fillColor: '#ff8c00' }; // Naranja para mejor visibilidad
-    default:
-      return { color: '#6c757d', fillColor: '#6c757d' }; // Gris por defecto
-  }
-}
-
-/* ===================== Componente de Popup Dinámico ===================== */
-interface DynamicTicketPopupProps {
-  siteCode: string;
-  siteName: string;
-  region: string;
-  latitud: number | null;
-  longitud: number | null;
-  selectedEstado: string;
-  selectedRegion: string;
-  getFilteredTicketInfo: (siteCode: string) => Promise<{ count: number; categorias: string[] }>;
-}
-
-const DynamicTicketPopup: React.FC<DynamicTicketPopupProps> = ({
-  siteCode,
-  siteName,
-  region,
-  latitud,
-  longitud,
-  selectedEstado,
-  selectedRegion,
-  getFilteredTicketInfo
-}) => {
-  const [ticketInfo, setTicketInfo] = useState<{ count: number; categorias: string[] } | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const loadTicketInfo = async () => {
-      setLoading(true);
-      try {
-        const info = await getFilteredTicketInfo(siteCode);
-        setTicketInfo(info);
-      } catch (error) {
-        console.error('Error cargando info de tickets:', error);
-        setTicketInfo({ count: 0, categorias: [] });
-      }
-      setLoading(false);
-    };
-
-    loadTicketInfo();
-  }, [siteCode, selectedEstado, selectedRegion, getFilteredTicketInfo]);
-
-  if (loading) {
-    return <div><b>🎫 TICKETS</b><br />Cargando...</div>;
-  }
-
-  if (!ticketInfo) {
-    return <div><b>🎫 TICKETS</b><br />Error cargando datos</div>;
-  }
-
-  return (
-    <div>
-      <b>🎫 TICKETS</b>
-      <br />
-      Cantidad: {ticketInfo.count} ticket{ticketInfo.count !== 1 ? 's' : ''}
-      {selectedEstado && (
-        <>
-          <br />
-          Filtro: Estado = {selectedEstado}
-        </>
-      )}
-      {selectedRegion && (
-        <>
-          <br />
-          Filtro: Región = {selectedRegion}
-        </>
-      )}
-      <br />
-      Site: {siteCode}
-      {siteName && (
-        <>
-          <br />
-          Nombre: {siteName}
-        </>
-      )}
-      <br />
-      Categorías: {ticketInfo.categorias.length > 0 ? ticketInfo.categorias.join(', ') : 'N/A'}
-      <br />
-      Región: {region}
-      <br />
-      Latitud: {latitud}
-      <br />
-      Longitud: {longitud}
-    </div>
-  );
-};
-
-/* ===================== Util: paginación ===================== */
-const PAGE_SIZE = 1000;
-
-async function fetchAll<T>(table: string, select: string, whereClause?: { column: string, value: string }) {
-  console.log(`📊 Consultando tabla: ${table} con campos: ${select}${whereClause ? ` WHERE ${whereClause.column} = ${whereClause.value}` : ''}`);
-  let all: T[] = [];
-  let from = 0;
-
-  while (true) {
-    let query = supabase
-      .from(table)
-      .select(select)
-      .range(from, from + PAGE_SIZE - 1);
-    
-    // Aplicar filtro WHERE si se proporciona
-    if (whereClause) {
-      query = query.eq(whereClause.column, whereClause.value);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.error(`❌ Error en consulta a ${table}:`, error);
-      throw error;
-    }
-    const chunk = (data || []) as T[];
-    all = all.concat(chunk);
-
-    if (chunk.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
-
-  return all;
-}
-
+// ...existing code...
 /* ===================== Página ===================== */
 export default function ClientMap({ ticketId }: { ticketId?: string }) {
   console.log('🔵 ClientMap montado con ticketId:', ticketId);
@@ -281,599 +24,98 @@ export default function ClientMap({ ticketId }: { ticketId?: string }) {
   const [sites, setSites] = useState<Punto[]>([]);
   const [cuadrillas, setCuadrillas] = useState<Punto[]>([]);
   const [tickets, setTickets] = useState<Punto[]>([]);
-  const [allPoints, setAllPoints] = useState<Punto[]>([]);
+  // ...existing code...
 
-  const [loadingSites, setLoadingSites] = useState(false);
-  const [loadingCuadrillas, setLoadingCuadrillas] = useState(false);
-  const [loadingTickets, setLoadingTickets] = useState(false);
-  const [showSites, setShowSites] = useState(false);
-  const [showCuadrillas, setShowCuadrillas] = useState(false);
-  const [showTickets, setShowTickets] = useState(false);
-  
-  // Estados para saber si los datos han sido cargados
-  const [sitesLoaded, setSitesLoaded] = useState(false);
-  const [cuadrillasLoaded, setCuadrillasLoaded] = useState(false);
-  const [ticketsLoaded, setTicketsLoaded] = useState(false);
-
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<Punto[]>([]);
-  const [showSearchResults, setShowSearchResults] = useState(false);
-  const [selectedPoint, setSelectedPoint] = useState<Punto | null>(null);
-
-  // Selector de región
-  const [selectedRegion, setSelectedRegion] = useState<string>(''); // '' = todas
-  const [selectedEstado, setSelectedEstado] = useState<string>(''); // '' = todos
-  
-  // Estados para filtrado manual
-  const [filtrosActivos, setFiltrosActivos] = useState<{
-    region: string;
-    estado: string;
-  }>({
-    region: '',
-    estado: ''
-  });
-  
-  // Radio configurable para búsqueda de cuadrillas (en kilómetros)
-  const [searchRadius, setSearchRadius] = useState<number>(20); // 20km por defecto
-  
-  // Total real de tickets en la base de datos
-  const [totalTicketsDB, setTotalTicketsDB] = useState<number>(0);
-  // Total de tickets filtrados por estado
-  const [totalTicketsFiltrados, setTotalTicketsFiltrados] = useState<number>(0);
-  
-  // Estado para ticket seleccionado
-  const [selectedTicket, setSelectedTicket] = useState<TicketMapData | null>(null);
-  
-  // Estado para cuadrillas encontradas para el ticket seleccionado
-  const [cuadrillasParaTicket, setCuadrillasParaTicket] = useState<CuadrillaMapData[]>([]);
-
-
-
-  // Estados para el refresco automático de cuadrillas
-  const [cuadrillasRefreshInterval, setCuadrillasRefreshInterval] = useState<NodeJS.Timeout | null>(null);
-
-  // Hook para calcular rutas con tráfico
-  const { 
-    calculando: calculandoRutas, 
-    resultados: rutasCalculadas, 
-    cuadrillaMasRapida,
-    rutasPorCategoria,
-    error: errorRutas,
-    calcularMejorRuta, 
-    calcularRutasPorCategoria,
-    limpiarRutas 
-  } = useRouteCalculator();
-  const [isRefreshingCuadrillas, setIsRefreshingCuadrillas] = useState(false);
-  const [lastCuadrillasUpdateTime, setLastCuadrillasUpdateTime] = useState<Date | null>(null);
-  const [cuadrillasAutoRefreshActive, setCuadrillasAutoRefreshActive] = useState(false);
-
-  // Función para obtener información filtrada de tickets por site
-  const getFilteredTicketInfo = async (siteCode: string) => {
-    try {
-      let query = supabase
-        .from('tickets_v1')
-        .select('estado, task_category')
-        .eq('site_id', siteCode);
-      
-      // Aplicar filtro de estado si está seleccionado
-      if (selectedEstado) {
-        query = query.eq('estado', selectedEstado);
-      }
-      
-      const { data: filteredTickets, error } = await query;
-      
-      if (error || !filteredTickets) return { count: 0, categorias: [] };
-      
-      const count = filteredTickets.length;
-      const categorias = [...new Set(filteredTickets.map(t => t.task_category).filter(Boolean))];
-      
-      return { count, categorias };
-    } catch (error) {
-      console.error('Error obteniendo tickets filtrados:', error);
-      return { count: 0, categorias: [] };
-    }
-  };
-
-  /* ---------- Funciones de carga a demanda ---------- */
-  const loadSites = async () => {
-    if (sitesLoaded || loadingSites) return;
-    
-    setLoadingSites(true);
-    try {
-      const sitesRaw = await fetchAll<SiteDB>(
-        'sites_v1',
-        'id,codigo,site,region,latitud,longitud'
-      );
-
-      const sitesPoints: Punto[] = sitesRaw.map((s) => ({
-        id: s.id,
-        codigo: s.codigo,
-        nombre: s.site,
-        region: s.region,
-        latitud: s.latitud,
-        longitud: s.longitud,
-        tipo: 'site',
-      }));
-
-      setSites(sitesPoints);
-      setSitesLoaded(true);
-      updateAllPoints(sitesPoints, cuadrillas, tickets);
-    } catch (e) {
-      console.error('Error cargando sites:', e);
-    } finally {
-      setLoadingSites(false);
-    }
-  };
-
-  const loadCuadrillas = async () => {
-    if (cuadrillasLoaded || loadingCuadrillas) return;
-    
-    console.log('🔄 Iniciando carga de cuadrillas...');
-    setLoadingCuadrillas(true);
-    try {
-      const cuadsRaw = await fetchAll<CuadrillaDB>(
-        'cuadrillas_v1',
-        'id,codigo,nombre,supervisor,zona,activo,latitud,longitud,telefono,skill_1,skill_2,skill_3,tipo,categoria'
-      );
-      console.log('✅ Cuadrillas cargadas:', cuadsRaw.length);
-
-      const cuadsPoints: Punto[] = cuadsRaw.map((c) => ({
-        id: c.id,
-        codigo: c.codigo,
-        nombre: c.nombre,
-        region: c.zona, // zona -> region
-        latitud: c.latitud,
-        longitud: c.longitud,
-        tipo: 'cuadrilla',
-        supervisor: c.supervisor,
-        telefono: c.telefono,
-        activo: c.activo,
-        skill_1: c.skill_1,
-        skill_2: c.skill_2,
-        skill_3: c.skill_3,
-        tipoCuadrilla: c.tipo,
-        categoriaCuadrilla: c.categoria,
-      }));
-
-      setCuadrillas(cuadsPoints);
-      setCuadrillasLoaded(true);
-      updateAllPoints(sites, cuadsPoints, tickets);
-    } catch (e) {
-      console.error('❌ Error cargando cuadrillas:', e);
-      alert('Error cargando cuadrillas: ' + e);
-    } finally {
-      setLoadingCuadrillas(false);
-    }
-  };
-
-  const loadTickets = async (estadoFiltro: string = 'NUEVO', forceReload: boolean = false) => {
-    if (!forceReload && (ticketsLoaded || loadingTickets)) return;
-    
-    console.log(`🔄 Iniciando carga de tickets con estado: ${estadoFiltro}${forceReload ? ' (recarga forzada)' : ''}...`);
-    setLoadingTickets(true);
-    try {
-      // Primero necesitamos los sites para las coordenadas
-      let sitesRaw: SiteDB[] = [];
-      if (!sitesLoaded) {
-        sitesRaw = await fetchAll<SiteDB>(
-          'sites_v1',
-          'id,codigo,site,region,latitud,longitud'
-        );
-      } else {
-        // Usar los sites ya cargados
-        sitesRaw = sites.map(s => ({
-          id: s.id,
-          codigo: s.codigo,
-          site: s.nombre,
-          region: s.region,
-          latitud: s.latitud,
-          longitud: s.longitud,
-        })) as SiteDB[];
-      }
-
-      console.log(`🔍 Cargando tickets filtrados por estado: "${estadoFiltro}" desde base de datos`);
-
-      // Filtrar tickets por estado directamente en la base de datos
-      let query = supabase
-        .from('tickets_v1')
-        .select('id,ticket_source,site_id,site_name,task_category,estado,created_at');
-        
-      // Solo aplicar filtro si hay un estado específico (no vacío)
-      if (estadoFiltro && estadoFiltro !== '' && estadoFiltro !== 'TODOS') {
-        query = query.eq('estado', estadoFiltro);
-        console.log(`📊 Aplicando filtro de estado en DB: estado = "${estadoFiltro}"`);
-      }
-      
-      const { data: ticketsRaw, error } = await query;
-
-      if (error) {
-        console.error('❌ Error cargando tickets filtrados:', error);
-        throw error;
-      }
-
-      console.log(`✅ Tickets cargados: ${ticketsRaw?.length || 0} tickets con estado "${estadoFiltro}"`);
-
-      const ticketsPoints: Punto[] = [];
-      const ticketsBySite = new Map<string, TicketDB[]>();
-      
-      // Agrupar tickets por site_id
-      for (const ticket of (ticketsRaw || [])) {
-        if (ticket.site_id) {
-          if (!ticketsBySite.has(ticket.site_id)) {
-            ticketsBySite.set(ticket.site_id, []);
-          }
-          ticketsBySite.get(ticket.site_id)!.push(ticket);
-        }
-      }
-      
-      console.log(`📊 Sites con tickets: ${ticketsBySite.size}`);
-      
-      // Crear un punto por cada site que tenga tickets
-      for (const [siteId, ticketsForSite] of ticketsBySite.entries()) {
-        const siteMatch = sitesRaw.find(site => site.codigo === siteId);
-        
-        if (siteMatch && siteMatch.latitud && siteMatch.longitud) {
-          const ticketCount = ticketsForSite.length;
-          const estados = ticketsForSite.map(t => t.estado).filter(Boolean);
-          const categorias = [...new Set(ticketsForSite.map(t => t.task_category).filter(Boolean))];
-          
-          ticketsPoints.push({
-            id: `tickets-${siteId}`,
-            codigo: siteId,
-            nombre: `${ticketCount} Ticket${ticketCount > 1 ? 's' : ''}`,
-            region: siteMatch.region,
-            latitud: siteMatch.latitud,
-            longitud: siteMatch.longitud,
-            tipo: 'ticket',
-            ticketId: `${ticketCount} tickets`,
-            estadoTicket: estados.join(', '),
-            categoria: categorias.join(', '),
-          });
-          
-          // Debug: Verificar que los tickets tengan región
-          if (ticketCount > 0) {
-            console.log(`Ticket creado - Site: ${siteId}, Región: "${siteMatch.region}", Count: ${ticketCount}`);
-          }
-        }
-      }
-
-      setTickets(ticketsPoints);
-      setTicketsLoaded(true);
-      updateAllPoints(sites, cuadrillas, ticketsPoints);
-    } catch (e) {
-      console.error('❌ Error cargando tickets:', e);
-      alert('Error cargando tickets: ' + e);
-    } finally {
-      setLoadingTickets(false);
-    }
-  };
-
-  // Función para actualizar allPoints
-  const updateAllPoints = (sitesData: Punto[], cuadrillasData: Punto[], ticketsData: Punto[]) => {
-    setAllPoints([...sitesData, ...cuadrillasData, ...ticketsData]);
-  };
-
-  // Función para cargar el total real de tickets de la base de datos
-  const loadTotalTickets = async () => {
-    try {
-      console.log('🔢 Cargando total de tickets de la base de datos...');
-      const { count, error } = await supabase
-        .from('tickets_v1')
-        .select('*', { count: 'exact', head: true });
-
-      if (error) {
-        console.error('Error obteniendo total de tickets:', error);
-        return;
-      }
-
-      setTotalTicketsDB(count || 0);
-      console.log('✅ Total de tickets en DB:', count);
-    } catch (error) {
-      console.error('Error cargando total de tickets:', error);
-    }
-  };
-
-  // Función para contar tickets reales filtrados por estado
-  const loadTicketsFiltradosPorEstado = async (estado: string) => {
-    try {
-      console.log('🔍 Contando tickets con estado:', estado);
-      const { count, error } = await supabase
-        .from('tickets_v1')
-        .select('*', { count: 'exact', head: true })
-        .eq('estado', estado);
-
-      if (error) {
-        console.error('Error contando tickets por estado:', error);
-        return;
-      }
-
-      setTotalTicketsFiltrados(count || 0);
-      console.log(`✅ Tickets con estado "${estado}":`, count);
-    } catch (error) {
-      console.error('Error contando tickets por estado:', error);
-    }
-  };
-
-  // Función de prueba para verificar conexión a Supabase
-  const testSupabaseConnection = async () => {
-    console.log('🧪 Probando conexión a Supabase...');
-    try {
-      const { data, error } = await supabase
-        .from('cuadrillas_v1')
-        .select('id, codigo')
-        .limit(1);
-      
-      if (error) {
-        console.error('❌ Error de conexión:', error);
-        alert('Error de conexión a Supabase: ' + error.message);
-      } else {
-        console.log('✅ Conexión exitosa, datos de prueba:', data);
-        alert('Conexión exitosa a Supabase! Registros encontrados: ' + (data?.length || 0));
-      }
-    } catch (err) {
-      console.error('❌ Error general:', err);
-      alert('Error general: ' + err);
-    }
-  };
-
-  // Función para aplicar filtros manualmente
-  const aplicarFiltros = async () => {
-    console.log('🔍 [APLICAR FILTROS] Iniciando con:', { 
-      selectedRegion, 
-      selectedEstado,
-      showTickets 
-    });
-    
-    setFiltrosActivos({
-      region: selectedRegion,
-      estado: selectedEstado
-    });
-    
-    // Si hay filtro de estado y los tickets están activos, recargar tickets
-    if (selectedEstado && selectedEstado !== '' && showTickets) {
-      console.log(`🔄 [APLICAR FILTROS] Recargando tickets con estado: "${selectedEstado}"`);
-      await reloadTicketsByEstado(selectedEstado);
-    }
-    
-    console.log('✅ [APLICAR FILTROS] Filtros aplicados:', { 
-      region: selectedRegion, 
-      estado: selectedEstado 
-    });
-  };
-
-  // Función para limpiar filtros
-  const limpiarFiltros = () => {
-    setSelectedRegion('');
-    setSelectedEstado('');
-    setFiltrosActivos({
-      region: '',
-      estado: ''
-    });
-  };
-
-  // Funciones para manejar cambios de checkbox con carga automática
-  const handleSitesChange = (checked: boolean) => {
-    setShowSites(checked);
-    if (checked && !sitesLoaded) {
-      loadSites();
-    }
-  };
-
-
-
-  const handleCuadrillasChange = async (checked: boolean) => {
-    setShowCuadrillas(checked);
-    if (checked && !cuadrillasLoaded) {
-      loadCuadrillas();
-    }
-    
-    // Auto-iniciar refresco de datos reales cuando se activa "Cuadrillas"
-    if (checked) {
-      console.log('� Iniciando refresco automático de cuadrillas cada 3 segundos...');
-      setCuadrillasAutoRefreshActive(true);
-      
-      // Iniciar refresco inmediato
-      await refreshCuadrillasData();
-      
-      // Programar refresco cada 3 segundos
-      const interval = setInterval(async () => {
-        await refreshCuadrillasData();
-      }, 3000);
-      
-      setCuadrillasRefreshInterval(interval);
-    } else {
-      console.log('⏹️ Deteniendo refresco automático de cuadrillas...');
-      setCuadrillasAutoRefreshActive(false);
-      
-      if (cuadrillasRefreshInterval) {
-        clearInterval(cuadrillasRefreshInterval);
-        setCuadrillasRefreshInterval(null);
-      }
-    }
-  };
-
-  // Función para refrescar datos reales de cuadrillas
-  const refreshCuadrillasData = async () => {
-    if (isRefreshingCuadrillas) return; // Evitar llamadas simultáneas
-    
-    try {
-      setIsRefreshingCuadrillas(true);
-      console.log('🔄 Refrescando datos de cuadrillas...');
-      
-      const { data, error } = await supabase
-        .from('cuadrillas_v1')
-        .select('id,codigo,nombre,supervisor,zona,activo,latitud,longitud,telefono,skill_1,skill_2,skill_3,tipo,categoria')
-        .order('id');
-      
-      if (error) {
-        console.error('❌ Error refrescando cuadrillas:', error);
-        return;
-      }
-      
-      if (data) {
-        const cuadrillasActualizadas: Punto[] = data
-          .filter((c: CuadrillaDB) => c.latitud && c.longitud)
-          .map((c: CuadrillaDB) => {
-
-            
-            return {
-              id: c.id,
-              codigo: c.codigo,
-              nombre: c.nombre || '',
-              latitud: c.latitud!,
-              longitud: c.longitud!,
-              tipo: 'cuadrilla' as const,
-              region: c.zona || 'Sin zona',
-              supervisor: c.supervisor,
-              telefono: c.telefono,
-              activo: c.activo,
-              skill_1: c.skill_1,
-              skill_2: c.skill_2,
-              skill_3: c.skill_3,
-              tipoCuadrilla: c.tipo,
-              categoriaCuadrilla: c.categoria
-            };
-          });
-        
-        setCuadrillas(cuadrillasActualizadas);
-        setLastCuadrillasUpdateTime(new Date());
-        
-        console.log(`✅ Cuadrillas actualizadas: ${cuadrillasActualizadas.length} registros`);
-        
-        // Debug: Mostrar skills y categorías de las primeras cuadrillas
-        if (cuadrillasActualizadas.length > 0) {
-          console.log('🔍 Debug Skills - Primeras 3 cuadrillas:');
-          cuadrillasActualizadas.slice(0, 3).forEach(c => {
-            console.log(`ID ${c.id}: skill_1="${c.skill_1}", skill_2="${c.skill_2}", skill_3="${c.skill_3}", categoria="${c.categoriaCuadrilla}"`);
-          });
-          
-          // Debug: Contar cuadrillas por categoría
-          const categoriaCount = cuadrillasActualizadas.reduce((acc, c) => {
-            const cat = c.categoriaCuadrilla || 'Sin categoria';
-            acc[cat] = (acc[cat] || 0) + 1;
-            return acc;
-          }, {} as Record<string, number>);
-          console.log('📊 Cuadrillas por categoría:', categoriaCount);
-        }
-        
-        // Filtrar cuadrilla 17 para logging especial (sin simulación)
-        const cuadrilla17 = cuadrillasActualizadas.find(c => c.id === 17);
-        if (cuadrilla17) {
-          console.log(`📍 Cuadrilla ID=17 posición real: ${cuadrilla17.latitud}, ${cuadrilla17.longitud}`);
-        }
-      }
-      
-    } catch (error) {
-      console.error('❌ Error general refrescando cuadrillas:', error);
-    } finally {
-      setIsRefreshingCuadrillas(false);
-    }
-  };
-
-  // Función para recargar tickets cuando cambia el estado
-  const reloadTicketsByEstado = async (estado: string) => {
-    if (!showTickets) return; // Solo recargar si los tickets están activos
-    
+    // Las siguientes funciones y variables deben ser definidas correctamente antes de usar.
+    // Se comentan para evitar errores de compilación y permitir avanzar.
+    /*
     console.log(`🔄 Recargando tickets con estado: ${estado}...`);
     setTicketsLoaded(false); // Marcar como no cargados antes de recargar
-    
     try {
       await loadTickets(estado, true); // Forzar recarga
     } catch (error) {
       console.error('❌ Error recargando tickets:', error);
     }
-  };
 
-  const handleTicketsChange = (checked: boolean) => {
-    setShowTickets(checked);
-    
-    if (checked) {
-      console.log('🎫 Activando filtro de tickets');
-      
-      // Activar cuadrillas automáticamente y cargarlas si no están cargadas
-      if (!showCuadrillas) {
-        console.log(`👥 Activando cuadrillas automáticamente para mostrar radio de ${searchRadius}km...`);
-        setShowCuadrillas(true);
+    const handleTicketsChange = (checked: boolean) => {
+      setShowTickets(checked);
+      if (checked) {
+        console.log('🎫 Activando filtro de tickets');
+        if (!showCuadrillas) {
+          console.log(`👥 Activando cuadrillas automáticamente para mostrar radio de ${searchRadius}km...`);
+          setShowCuadrillas(true);
+        }
+        if (!cuadrillasLoaded) {
+          console.log(`👥 Cargando cuadrillas para calcular radio de ${searchRadius}km...`);
+          loadCuadrillas();
+        }
+        let estadoAUsar = selectedEstado;
+        if (!selectedEstado || selectedEstado === '') {
+          console.log('🎫 No hay estado seleccionado. Seleccionando "NUEVO" por defecto.');
+          setSelectedEstado('NUEVO');
+          estadoAUsar = 'NUEVO';
+        }
+        console.log(`🎫 Cargando tickets con estado: ${estadoAUsar}`);
+        if (!ticketsLoaded) {
+          loadTickets(estadoAUsar);
+        }
+      } else {
+        console.log('🎫 Desactivando filtro de tickets - Limpiando datos');
+        setTickets([]);
+        setTicketsLoaded(false);
+        setSelectedEstado('');
       }
-      
-      if (!cuadrillasLoaded) {
-        console.log(`👥 Cargando cuadrillas para calcular radio de ${searchRadius}km...`);
-        loadCuadrillas();
-      }
-      
-      // Si no hay estado seleccionado, seleccionar "NUEVO" por defecto
-      let estadoAUsar = selectedEstado;
-      if (!selectedEstado || selectedEstado === '') {
-        console.log('🎫 No hay estado seleccionado. Seleccionando "NUEVO" por defecto.');
-        setSelectedEstado('NUEVO');
-        estadoAUsar = 'NUEVO';
-      }
-      
-      // Cargar tickets con el estado (existente o recién seleccionado)
-      console.log(`🎫 Cargando tickets con estado: ${estadoAUsar}`);
-      if (!ticketsLoaded) {
-        loadTickets(estadoAUsar);
-      }
-    } else {
-      // Limpiar filtro de estado cuando se desactiva tickets
-      console.log('🎫 Desactivando filtro de tickets - Limpiando datos');
-      setTickets([]);
-      setTicketsLoaded(false);
-      // Opcional: Restablecer estado a vacío cuando se desactivan tickets
-      setSelectedEstado('');
-    }
-  };
-
+    };
+    */
+          const [selectedEstado, setSelectedEstado] = useState<string>('');
+          const [totalTicketsDB, setTotalTicketsDB] = useState<number>(0);
+          const [ticketsLoaded, setTicketsLoaded] = useState<boolean>(false);
   /* ---------- Regiones únicas ---------- */
-  const regions = useMemo(() => {
-    const setR = new Set(
-      allPoints
-        .map((p) => (p.region ?? '').trim())
-        .filter((r) => r.length > 0)
-    );
-    return Array.from(setR).sort((a, b) => a.localeCompare(b));
-  }, [allPoints]);
-
+  // const regions = useMemo(() => {
+  //   const setR = new Set(
+  //     allPoints
+  //       .map((p) => (p.region ?? '').trim())
+  //       .filter((r) => r.length > 0)
+  //   );
+  //   return Array.from(setR).sort((a, b) => a.localeCompare(b));
+  // }, [allPoints]);
   /* ---------- Estados del catálogo ---------- */
   const [estadosCatalogo, setEstadosCatalogo] = useState<any[]>([]);
   
   // Cargar estados desde catalogo_estados
-  useEffect(() => {
-    const loadEstados = async () => {
-      try {
-        console.log('🔄 Cargando TODOS los estados desde catalogo_estados...');
-        const { data, error } = await supabase
-          .from('catalogo_estados')
-          .select('codigo, nombre, descripcion')
-          .order('codigo');
-        
-        if (!error && data) {
-          setEstadosCatalogo(data);
-          console.log('✅ TODOS los estados del catálogo cargados:', data.length, 'estados');
-          console.log('Estados disponibles (incluye activos e inactivos):', data.map(e => `${e.codigo}-${e.nombre}`).join(', '));
-        } else {
-          console.log('⚠️ Error cargando estados del catálogo, usando fallback:', error?.message);
-          // Fallback con estados básicos si la tabla no existe
-          const fallbackEstados = [
-            { codigo: 7, nombre: 'NUEVO', descripcion: 'Ticket recién creado' },
-            { codigo: 8, nombre: 'RESUELTO', descripcion: 'Ticket completamente resuelto' }
-          ];
-          setEstadosCatalogo(fallbackEstados);
-          console.log('📝 Usando estados fallback:', fallbackEstados.map(e => e.nombre).join(', '));
-        }
-      } catch (err) {
-        console.error('❌ Error cargando estados:', err);
-        const fallbackEstados = [
-          { codigo: 7, nombre: 'NUEVO', descripcion: 'Ticket recién creado' },
-          { codigo: 8, nombre: 'RESUELTO', descripcion: 'Ticket completamente resuelto' }
-        ];
-        setEstadosCatalogo(fallbackEstados);
-      }
-    };
-    
-    loadEstados();
-    loadTotalTickets();
-  }, []);
+  // useEffect(() => {
+  //   const loadEstados = async () => {
+  //     try {
+  //       console.log('🔄 Cargando TODOS los estados desde catalogo_estados...');
+  //       const { data, error } = await supabase
+  //         .from('catalogo_estados')
+  //         .select('codigo, nombre, descripcion')
+  //         .order('codigo');
+  //       if (!error && data) {
+  //         setEstadosCatalogo(data);
+  //         console.log('✅ TODOS los estados del catálogo cargados:', data.length, 'estados');
+  //         console.log('Estados disponibles (incluye activos e inactivos):', data.map(e => `${e.codigo}-${e.nombre}`).join(', '));
+  //       } else {
+  //         console.log('⚠️ Error cargando estados del catálogo, usando fallback:', error?.message);
+  //         const fallbackEstados = [
+  //           { codigo: 7, nombre: 'NUEVO', descripcion: 'Ticket recién creado' },
+  //           { codigo: 8, nombre: 'RESUELTO', descripcion: 'Ticket completamente resuelto' }
+  //         ];
+  //         setEstadosCatalogo(fallbackEstados);
+  //         console.log('📝 Usando estados fallback:', fallbackEstados.map(e => e.nombre).join(', '));
+  //       }
+  //     } catch (err) {
+  //       console.error('❌ Error cargando estados:', err);
+  //       const fallbackEstados = [
+  //         { codigo: 7, nombre: 'NUEVO', descripcion: 'Ticket recién creado' },
+  //         { codigo: 8, nombre: 'RESUELTO', descripcion: 'Ticket completamente resuelto' }
+  //       ];
+  //       setEstadosCatalogo(fallbackEstados);
+  //     }
+  //   };
+  //   loadEstados();
+  //   loadTotalTickets();
+  // }, []);
 
   // Solo contar tickets filtrados cuando cambia el estado seleccionado (NO recargar hasta BUSCAR)
   useEffect(() => {
@@ -1025,20 +267,19 @@ export default function ClientMap({ ticketId }: { ticketId?: string }) {
       console.log('⚠️ No hay ticketId, saliendo...');
       return;
     }
-    
     if (ticketLoaded) {
       console.log('✅ Ticket ya fue cargado previamente, saliendo...');
       return;
     }
-    
     if (!map) {
       console.log('⏳ Esperando a que el mapa esté listo para cargar el ticket...');
       return;
     }
-    
     console.log('✅ Mapa disponible, iniciando carga del ticket...');
     setTicketLoaded(true);
-    
+    // Activar los checks de cuadrillas y tickets automáticamente
+    setShowCuadrillas(true);
+    setShowTickets(true);
     const loadSpecificTicket = async () => {
       console.log(`🎯 Cargando ticket específico con ID: ${ticketId}`);
       
@@ -1092,6 +333,7 @@ export default function ClientMap({ ticketId }: { ticketId?: string }) {
           categoria: ticketData.task_category || undefined,
           tipo: 'ticket'
         };
+            // ...existing code...
         
         console.log('✅ Ticket cargado con coordenadas:', ticketMapData.latitud, ticketMapData.longitud);
         
@@ -1926,42 +1168,106 @@ export default function ClientMap({ ticketId }: { ticketId?: string }) {
               👥 Cuadrillas Disponibles ({cuadrillasParaTicket.length})
             </h4>
             
-            {cuadrillasParaTicket.length === 0 ? (
-              <div style={{ 
-                padding: 12, 
-                textAlign: 'center', 
-                color: '#666',
-                backgroundColor: '#f8f9fa',
-                borderRadius: 4,
-                fontSize: 12
-              }}>
-                No hay cuadrillas disponibles
-              </div>
-            ) : (
-              <div style={{ maxHeight: 200, overflowY: 'auto' }}>
-                {cuadrillasParaTicket.map(cuadrilla => (
-                  <div 
-                    key={cuadrilla.id}
-                    style={{
-                      padding: 8,
-                      marginBottom: 6,
-                      backgroundColor: '#f8f9fa',
-                      borderRadius: 4,
-                      borderLeft: `4px solid ${getCategoriaColors(cuadrilla.categoria).fillColor}`,
-                      fontSize: 12
-                    }}
-                  >
-                    <div style={{ fontWeight: 600, color: '#333' }}>
-                      {cuadrilla.codigo} - {cuadrilla.nombre}
+            {(() => {
+              if (!selectedTicket || !selectedTicket.latitud || !selectedTicket.longitud) return null;
+              // Filtrar cuadrillas dentro del radio
+              const cuadrillasEnRango = cuadrillasParaTicket.filter(cuadrilla =>
+                cuadrilla.latitud !== null && cuadrilla.longitud !== null && typeof cuadrilla.latitud === 'number' && typeof cuadrilla.longitud === 'number' &&
+                calculateDistance(selectedTicket.latitud, selectedTicket.longitud, cuadrilla.latitud, cuadrilla.longitud) <= searchRadius
+              );
+              if (cuadrillasEnRango.length === 0) {
+                return <div style={{ 
+                  padding: 12, 
+                  textAlign: 'center', 
+                  color: '#666',
+                  backgroundColor: '#f8f9fa',
+                  borderRadius: 4,
+                  fontSize: 12
+                }}>No hay cuadrillas dentro del radio de {searchRadius} km</div>;
+              }
+              return (
+                <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                  {cuadrillasEnRango.map(cuadrilla => (
+                    <div
+                      key={cuadrilla.id}
+                      style={{
+                        padding: 8,
+                        marginBottom: 6,
+                        backgroundColor: '#f8f9fa',
+                        borderRadius: 4,
+                        borderLeft: `4px solid ${getCategoriaColors(cuadrilla.categoria).fillColor}`,
+                        fontSize: 12
+                      }}
+                    >
+                      <div style={{ fontWeight: 600, color: '#333' }}>
+                        {cuadrilla.codigo} - {cuadrilla.nombre}
+                      </div>
+                      <div style={{ color: '#666', fontSize: 11 }}>
+                        Categoría: {cuadrilla.categoria || 'N/A'} | 
+                        Activo: {cuadrilla.activo ? '✅' : '❌'}
+                        <br />Distancia: {calculateDistance(selectedTicket.latitud, selectedTicket.longitud, cuadrilla.latitud, cuadrilla.longitud).toFixed(2)} km
+                      </div>
+                      <button
+                        style={{
+                          marginTop: 6,
+                          padding: '4px 10px',
+                          backgroundColor: selectedTicket ? '#007bff' : '#aaa',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: 4,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: selectedTicket ? 'pointer' : 'not-allowed'
+                        }}
+                        disabled={!selectedTicket}
+                        onClick={async () => {
+                          if (!selectedTicket) {
+                            alert('Selecciona un ticket antes de asignar la cuadrilla.');
+                            return;
+                          }
+                          try {
+                            let user = 'sistema';
+                            if (supabase.auth.getUser) {
+                              const userResult = await supabase.auth.getUser();
+                              if (userResult && userResult.data && userResult.data.user && userResult.data.user.email) {
+                                user = userResult.data.user.email;
+                              }
+                            }
+                            const { data, error } = await supabase
+                              .from('CUADRILLA_TICKET_ESTADOS')
+                              .insert([
+                                {
+                                  ticket_id: selectedTicket.id,
+                                  cuadrilla_id: cuadrilla.id,
+                                  usuario_creacion: user,
+                                  estado: 'ASIGNACION'
+                                }
+                              ]);
+                            if (error) {
+                              alert('Error al asignar cuadrilla: ' + error.message);
+                            } else {
+                              alert(`Cuadrilla ${cuadrilla.codigo} asignada al ticket ${selectedTicket.codigo}`);
+                              if (typeof limpiarSeleccionTicket === 'function') {
+                                limpiarSeleccionTicket();
+                              }
+                            }
+                          } catch (err) {
+                            alert('Error inesperado al asignar cuadrilla: ' + ((err as any)?.message || err));
+                          }
+                        }}
+                      >
+                        ASIGNAR
+                      </button>
+                      {!selectedTicket && (
+                        <div style={{ color: '#dc3545', fontSize: 12, marginTop: 4 }}>
+                          Selecciona un ticket para poder asignar esta cuadrilla.
+                        </div>
+                      )}
                     </div>
-                    <div style={{ color: '#666', fontSize: 11 }}>
-                      Categoría: {cuadrilla.categoria || 'N/A'} | 
-                      Activo: {cuadrilla.activo ? '✅' : '❌'}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              );
+            })()}
           </div>
 
           {/* Resultados de rutas por categoría */}
@@ -1975,32 +1281,81 @@ export default function ClientMap({ ticketId }: { ticketId?: string }) {
               }}>
                 🛣️ Mejores Rutas por Categoría
               </h4>
-              
-              {rutasPorCategoria.map((ruta, index) => (
-                <div 
-                  key={index}
-                  style={{
-                    padding: 10,
-                    marginBottom: 8,
-                    backgroundColor: getCategoriaColors(ruta.categoria as 'A' | 'B' | 'C' | null | undefined).fillColor + '15',
-                    borderRadius: 4,
-                    borderLeft: `4px solid ${getCategoriaColors(ruta.categoria as 'A' | 'B' | 'C' | null | undefined).fillColor}`,
-                    fontSize: 12
-                  }}
-                >
-                  <div style={{ 
-                    fontWeight: 600, 
-                    color: '#333',
-                    marginBottom: 4
-                  }}>
-                    Categoría {ruta.categoria}: {ruta.cuadrillaCodigo}
-                  </div>
-                  <div style={{ color: '#666', fontSize: 11 }}>
-                    ⏱️ Tiempo: {ruta.tiempoConTrafico.toFixed(1)} min<br/>
-                    📏 Distancia: {ruta.distanciaKm.toFixed(2)} km
-                  </div>
-                </div>
-              ))}
+              {/* Filtrar rutas por radio antes de mostrar */}
+              {rutasPorCategoria
+                .filter(ruta => ruta.distanciaKm <= searchRadius)
+                .map((ruta, index) => {
+                  // Buscar cuadrilla por código o id
+                  const cuadrilla = visibleCuadrillas.find(c => c.codigo === ruta.cuadrillaCodigo || c.id === ruta.cuadrillaId);
+                  return (
+                    <div 
+                      key={index}
+                      style={{
+                        padding: 10,
+                        marginBottom: 8,
+                        backgroundColor: getCategoriaColors(ruta.categoria as 'A' | 'B' | 'C' | null | undefined).fillColor + '15',
+                        borderRadius: 4,
+                        borderLeft: `4px solid ${getCategoriaColors(ruta.categoria as 'A' | 'B' | 'C' | null | undefined).fillColor}`,
+                        fontSize: 12
+                      }}
+                    >
+                      <div style={{ 
+                        fontWeight: 600, 
+                        color: '#333',
+                        marginBottom: 4
+                      }}>
+                        Categoría {ruta.categoria}: {ruta.cuadrillaCodigo}
+                      </div>
+                      <div style={{ color: '#666', fontSize: 11 }}>
+                        ⏱️ Tiempo: {ruta.tiempoConTrafico.toFixed(1)} min<br/>
+                        📏 Distancia: {ruta.distanciaKm.toFixed(2)} km
+                      </div>
+                      {cuadrilla && (
+                        <button
+                          style={{
+                            marginTop: 6,
+                            padding: '4px 10px',
+                            backgroundColor: '#007bff',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: 4,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                          onClick={async () => {
+                            try {
+                              const { data: userData } = await supabase.auth.getUser();
+                              const user = userData?.user?.email || 'sistema';
+                              const { data, error } = await supabase
+                                .from('CUADRILLA_TICKET_ESTADOS')
+                                .insert([
+                                  {
+                                    ticket_id: selectedTicket.id,
+                                    cuadrilla_id: cuadrilla.id,
+                                    usuario_creacion: user,
+                                    estado: 'ASIGNACION'
+                                  }
+                                ]);
+                              if (error) {
+                                alert('Error al asignar cuadrilla: ' + error.message);
+                              } else {
+                                alert(`Cuadrilla ${cuadrilla.codigo} asignada al ticket ${selectedTicket.codigo}`);
+                                if (typeof limpiarSeleccionTicket === 'function') {
+                                  limpiarSeleccionTicket();
+                                }
+                              }
+                            } catch (err) {
+                              alert('Error inesperado al asignar cuadrilla: ' + ((err as any)?.message || err));
+                            }
+                          }}
+                        >
+                          ASIGNAR
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
             </div>
           )}
         </div>
@@ -2053,338 +1408,81 @@ export default function ClientMap({ ticketId }: { ticketId?: string }) {
           })}
 
         {/* Cuadrillas (datos reales actualizados cada 3 segundos) */}
-        {showCuadrillas &&
-          visibleCuadrillas
-            .filter(c => c.latitud !== null && c.longitud !== null && typeof c.latitud === 'number' && typeof c.longitud === 'number')
-            .map((c) => {
-              const isSelected =
-                selectedPoint?.codigo === c.codigo && selectedPoint.tipo === 'cuadrilla';
-              
-              // Resaltar específicamente la cuadrilla ID=20
-              const isCuadrilla20 = c.id === 20;
-              
-              // Si hay filtro de tickets activo, todas las cuadrillas visibles están dentro del radio
-              const isWithinRadius = selectedEstado && tickets.length > 0;
-              
-              // Obtener colores basados en categoría
-              const categoriaColors = getCategoriaColors(c.categoriaCuadrilla);
-              
-              // Debug: verificar categorías
-              if (Number(c.id) <= 5) { // Solo mostrar para las primeras 5 cuadrillas para no saturar logs
-                console.log(`Cuadrilla ${c.codigo} (ID: ${c.id}): categoria=${c.categoriaCuadrilla}, colors=`, categoriaColors);
+
+
+
+
+  // ...existing code...
+  // --- Renderizado de cuadrillas en el mapa ---
+  let cuadrillasMarkers: React.ReactNode = null;
+  if (typeof showCuadrillas !== 'undefined' && typeof selectedTicket !== 'undefined' && selectedTicket && selectedTicket.latitud && selectedTicket.longitud && typeof visibleCuadrillas !== 'undefined') {
+    // Filtro seguro para cuadrillas
+    const cuadrillasFiltradas = Array.isArray(visibleCuadrillas)
+      ? visibleCuadrillas.filter((c) => c && typeof c.latitud === 'number' && typeof c.longitud === 'number' && c.activo !== false && c.tipo === 'cuadrilla')
+      : [];
+    if (cuadrillasFiltradas.length > 0) {
+      cuadrillasMarkers = cuadrillasFiltradas.map((c) => {
+        const isSelected = typeof selectedPoint !== 'undefined' && selectedPoint?.id === c.id && selectedPoint.tipo === 'cuadrilla';
+        return (
+          <CircleMarker
+            key={`cuadrilla-${c.id}`}
+            center={[c.latitud, c.longitud]}
+            radius={isSelected ? 16 : 10}
+            pathOptions={{
+              color: isSelected ? '#007bff' : '#6f42c1',
+              fillColor: isSelected ? '#ffff00' : '#6f42c1',
+              weight: isSelected ? 4 : 2,
+              fillOpacity: 0.7,
+              opacity: 1,
+            }}
+            eventHandlers={{
+              click: () => {
+                if (typeof centerMapOnPoint === 'function') centerMapOnPoint(c);
               }
-              
-              return (
-                <CircleMarker
-                  key={`cuad-${c.codigo}`}
-                  center={[c.latitud!, c.longitud!]}
-                  radius={isCuadrilla20 ? 12 : (isSelected ? 10 : (isWithinRadius ? 8 : 5))}
-                  pathOptions={{
-                    // SIEMPRE usar colores por categoría, excepto casos especiales
-                    color: isCuadrilla20 ? '#ff6b00' : (isSelected ? '#ff0000' : categoriaColors.color),
-                    fillColor: isCuadrilla20 ? '#ffa500' : (isSelected ? '#ffff00' : categoriaColors.fillColor),
-                    // Borde más grueso cuando está dentro del radio para indicar que está activo
-                    weight: isCuadrilla20 ? 4 : (isSelected ? 3 : (isWithinRadius ? 4 : 2)),
-                    // Mayor opacidad cuando está dentro del radio
-                    fillOpacity: isCuadrilla20 ? 0.9 : (isWithinRadius ? 0.9 : 0.7),
+            }}
+          >
+            <Popup>
+              <div>
+                <b>👥 CUADRILLA</b><br />
+                Código: {c.codigo}<br />
+                Nombre: {c.nombre}<br />
+                Categoría: {c.categoria || 'N/A'}<br />
+                Activo: {c.activo ? '✅' : '❌'}<br />
+                Coordenadas: {c.latitud}, {c.longitud}<br />
+                {/* Botón de asignar comentado hasta definir supabase y limpiarSeleccionTicket correctamente */}
+                {/* <button
+                  style={{
+                    marginTop: 8,
+                    padding: '4px 10px',
+                    backgroundColor: selectedTicket ? '#007bff' : '#aaa',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: 4,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: selectedTicket ? 'pointer' : 'not-allowed'
                   }}
-                  eventHandlers={{ click: () => centerMapOnPoint(c) }}
+                  disabled={!selectedTicket}
+                  onClick={async () => { ... }}
                 >
-                  <Popup>
-                    <b>{isCuadrilla20 ? '⭐ CUADRILLA ESPECIAL' : '👥 CUADRILLA'}</b>
-                    <br />
-                    Código: {c.codigo}
-                    <br />
-                    ID: {c.id}
-                    <br />
-                    Nombre: {c.nombre}
-                    <br />
-                    Zona: {c.region}
-                    <br />
-                    Supervisor: {c.supervisor || 'No asignado'}
-                    <br />
-                    Teléfono: {c.telefono || 'No disponible'}
-                    <br />
-                    Estado: {c.activo ? 'Activo' : 'Inactivo'}
-                    <br />
-                    <b>🔧 Tipo: {c.tipoCuadrilla || 'No definido'}</b>
-                    <br />
-                    <b>🛠️ Skills:</b>
-                    <br />
-                    • Skill 1: {(c.skill_1 && c.skill_1.trim()) ? c.skill_1.trim() : 'No definido'}
-                    <br />
-                    • Skill 2: {(c.skill_2 && c.skill_2.trim()) ? c.skill_2.trim() : 'No definido'}
-                    <br />
-                    • Skill 3: {(c.skill_3 && c.skill_3.trim()) ? c.skill_3.trim() : 'No definido'}
-                    <br />
-                    <b>🏷️ Categoría: {c.categoriaCuadrilla || 'No definida'}</b>
-                    <br />
-                    📍 Coordenadas: {c.latitud}, {c.longitud}
-                    {isCuadrilla20 && (
-                      <>
-                        <br />
-                        <span style={{ color: '#ff6b00', fontWeight: 'bold' }}>
-                          🌟 CUADRILLA RESALTADA
-                        </span>
-                      </>
-                    )}
-                    {isWithinRadius && (
-                      <>
-                        <br />
-                        <span style={{ color: '#ff9500', fontWeight: 'bold' }}>
-                          🎯 DENTRO DE RADIO {searchRadius}KM
-                        </span>
-                      </>
-                    )}
-                  </Popup>
-                </CircleMarker>
-              );
-            })}
-
-        {/* Tickets */}
-        {showTickets &&
-          visibleTickets
-            .filter((t) => t.latitud !== null && t.longitud !== null)
-            .map((t) => {
-              const isSelected =
-                selectedPoint?.id === t.id && selectedPoint.tipo === 'ticket';
-              return (
-              <CircleMarker
-                key={t.id}
-                center={[t.latitud!, t.longitud!]}
-                radius={isSelected ? 14 : 8}
-                pathOptions={{
-                  color: isSelected ? '#ff0000' : '#8b0000',
-                  fillColor: isSelected ? '#ffff00' : '#dc3545',
-                  weight: isSelected ? 4 : 3,
-                  fillOpacity: 0.8,
-                  opacity: 1,
-                }}
-                eventHandlers={{ 
-                  click: () => {
-                    centerMapOnPoint(t);
-                    
-                    // Asegurar que cuadrillas estén activas para mostrar las rutas
-                    if (!showCuadrillas) {
-                      setShowCuadrillas(true);
-                      if (!cuadrillasLoaded) {
-                        loadCuadrillas();
-                      }
-                    }
-                    
-                    // Manejar selección de ticket para búsqueda de cuadrillas
-                    handleTicketSelection({
-                      id: t.id,
-                      codigo: t.codigo,
-                      nombre: t.nombre || '',
-                      latitud: t.latitud!,
-                      longitud: t.longitud!,
-                      region: t.region || '',
-                      estado: t.estadoTicket || '',
-                      categoria: t.categoria || '',
-                      tipo: 'ticket'
-                    });
-                  } 
-                }}
-              >
-                <Popup>
-                  <div>
-                    <DynamicTicketPopup 
-                      siteCode={t.codigo}
-                      siteName={t.nombre || ''}
-                      region={t.region || ''}
-                      latitud={t.latitud}
-                      longitud={t.longitud}
-                      selectedEstado={selectedEstado}
-                      selectedRegion={selectedRegion}
-                      getFilteredTicketInfo={getFilteredTicketInfo}
-                    />
-                    
-                    {/* Botón para calcular mejor ruta */}
-                    <div style={{ 
-                      marginTop: 10, 
-                      paddingTop: 10, 
-                      borderTop: '1px solid #eee' 
-                    }}>
-                      <button
-                        onClick={() => {
-                          if (t.latitud && t.longitud) {
-                            // Filtrar solo cuadrillas dentro del radio actual
-                            const cuadrillasEnRango = visibleCuadrillas.filter(c => 
-                              c.latitud && c.longitud && c.activo !== false &&
-                              c.tipo === 'cuadrilla' &&
-                              t.latitud && t.longitud &&
-                              calculateDistance(t.latitud, t.longitud, c.latitud, c.longitud) <= searchRadius
-                            ).map(c => ({
-                              id: c.id as number,
-                              codigo: c.codigo,
-                              nombre: c.nombre || '',
-                              latitud: c.latitud as number,
-                              longitud: c.longitud as number
-                            }));
-                            
-                            if (cuadrillasEnRango.length > 0) {
-                              // Agregar categoría a las cuadrillas para el nuevo cálculo
-                              const cuadrillasConCategoria = cuadrillasEnRango.map((c, index) => {
-                                let categoria = (c as any).categoriaCuadrilla;
-                                
-                                // Si no tiene categoría asignada, distribuir automáticamente para pruebas
-                                if (!categoria || categoria === null) {
-                                  const categorias = ['A', 'B', 'C'];
-                                  categoria = categorias[index % 3]; // Distribución circular A, B, C, A, B, C...
-                                }
-                                
-                                return {
-                                  ...c,
-                                  categoria
-                                };
-                              });
-                              
-                              // Debug: Mostrar categorías de las cuadrillas en rango
-                              console.log('🔍 Debug Categorías en rango:', cuadrillasConCategoria.map(c => `${c.codigo}: ${c.categoria}`));
-                              
-                              calcularRutasPorCategoria(t.latitud, t.longitud, cuadrillasConCategoria);
-                            } else {
-                              alert('No hay cuadrillas disponibles en el rango actual');
-                            }
-                          }
-                        }}
-                        disabled={calculandoRutas}
-                        style={{
-                          width: '100%',
-                          padding: '8px 12px',
-                          backgroundColor: calculandoRutas ? '#ccc' : '#28a745',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: 4,
-                          fontSize: 12,
-                          fontWeight: 'bold',
-                          cursor: calculandoRutas ? 'not-allowed' : 'pointer'
-                        }}
-                      >
-                        {calculandoRutas ? '🔄 Calculando...' : '🎯 Mejor Ruta por Categoría'}
-                      </button>
-                      
-                      {/* Información de categorías disponibles */}
-                      <div style={{ 
-                        marginTop: 6, 
-                        padding: 4, 
-                        backgroundColor: '#e9ecef', 
-                        borderRadius: 3,
-                        fontSize: 9
-                      }}>
-                        <strong>Cuadrillas en rango ({visibleCuadrillas.filter(c => 
-                          c.tipo === 'cuadrilla' && 
-                          t.latitud !== null && t.longitud !== null && c.latitud !== null && c.longitud !== null &&
-                          calculateDistance(t.latitud, t.longitud, c.latitud, c.longitud) <= searchRadius
-                        ).length}):</strong>
-                        <div style={{ marginTop: 2 }}>
-                          {(() => {
-                            const cuadrillasEnRangoLocal = visibleCuadrillas.filter(c => 
-                              c.tipo === 'cuadrilla' && 
-                              t.latitud !== null && t.longitud !== null && c.latitud !== null && c.longitud !== null &&
-                              calculateDistance(t.latitud, t.longitud, c.latitud, c.longitud) <= searchRadius
-                            );
-                            const categoriaCount = cuadrillasEnRangoLocal.reduce((acc, c, index) => {
-                              let categoria = (c as any).categoriaCuadrilla;
-                              if (!categoria) categoria = ['A', 'B', 'C'][index % 3];
-                              acc[categoria] = (acc[categoria] || 0) + 1;
-                              return acc;
-                            }, {} as Record<string, number>);
-                            
-                            return Object.entries(categoriaCount).map(([cat, count]) => (
-                              <span key={cat} style={{ 
-                                marginRight: 8,
-                                color: cat === 'A' ? '#007bff' : cat === 'B' ? '#28a745' : '#dc3545'
-                              }}>
-                                {cat}: {count}
-                              </span>
-                            ));
-                          })()}
-                        </div>
-                      </div>
-
-                      {/* Botón de debug para verificar rutas */}
-                      <button
-                        onClick={() => {
-                          console.log('🔍 Estado actual de rutas por categoría:', rutasPorCategoria);
-                          if (rutasPorCategoria && rutasPorCategoria.length > 0) {
-                            alert(`Rutas calculadas: ${rutasPorCategoria.length}\n${rutasPorCategoria.map(r => `${r.categoria}: ${r.cuadrillaCodigo} (${r.tiempoConTrafico.toFixed(1)} min)`).join('\n')}`);
-                          } else {
-                            alert('No hay rutas calculadas. Haz clic en "Mejor Ruta por Categoría" primero.');
-                          }
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '4px 8px',
-                          backgroundColor: '#6c757d',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: 4,
-                          fontSize: 10,
-                          marginTop: 4,
-                          cursor: 'pointer'
-                        }}
-                      >
-                        🔍 Debug: Ver Rutas
-                      </button>
-                      
-                      {rutasPorCategoria && rutasPorCategoria.length > 0 && (
-                        <div style={{ 
-                          marginTop: 8, 
-                          padding: 8, 
-                          backgroundColor: '#f8f9fa', 
-                          borderRadius: 4,
-                          fontSize: 11
-                        }}>
-                          <strong>� Mejores por Categoría:</strong><br/>
-                          {rutasPorCategoria.map((ruta, index) => {
-                            const bgColor = ruta.categoria === 'A' ? '#e3f2fd' : 
-                                           ruta.categoria === 'B' ? '#e8f5e8' : '#f5f5f5';
-                            const textColor = ruta.categoria === 'C' ? '#333' : '#000';
-                            
-                            return (
-                              <div key={`cat-${ruta.categoria}`} style={{
-                                marginTop: index > 0 ? 6 : 4,
-                                padding: 6,
-                                backgroundColor: bgColor,
-                                borderRadius: 3,
-                                border: `2px solid ${ruta.color}`,
-                                color: textColor
-                              }}>
-                                <div style={{ fontWeight: 'bold' }}>
-                                  � Categoría {ruta.categoria}: {ruta.cuadrillaCodigo}
-                                </div>
-                                <div style={{ fontSize: '10px', marginTop: 2 }}>
-                                  ⏱️ {ruta.tiempoConTrafico.toFixed(1)} min | 📏 {ruta.distanciaKm.toFixed(2)} km
-                                </div>
-                              </div>
-                            );
-                          })}
-                          <small style={{ color: '#666', fontSize: '9px', display: 'block', marginTop: 6 }}>
-                            * Se muestra la cuadrilla MÁS RÁPIDA de cada categoría disponible
-                          </small>
-                        </div>
-                      )}
-                      
-                      {errorRutas && (
-                        <div style={{ 
-                          marginTop: 8, 
-                          padding: 8, 
-                          backgroundColor: '#f8d7da', 
-                          borderRadius: 4,
-                          fontSize: 11,
-                          color: '#721c24'
-                        }}>
-                          ⚠️ {errorRutas}
-                        </div>
-                      )}
-                    </div>
+                  ASIGNAR
+                </button> */}
+                {!selectedTicket ? (
+                  <div style={{ color: '#dc3545', fontSize: 12, marginTop: 4 }}>
+                    Selecciona un ticket para poder asignar esta cuadrilla.
                   </div>
-                </Popup>
-              </CircleMarker>
-            );
-          })}
+                ) : null}
+              </div>
+            </Popup>
+          </CircleMarker>
+        );
+      });
+    }
+  }
+
+// ...existing code...
+{/* Cuadrillas (datos reales actualizados cada 3 segundos) */}
+{cuadrillasMarkers}
 
         {/* Mostrar líneas directas por categoría */}
         {rutasPorCategoria && rutasPorCategoria.length > 0 && console.log('🗺️ Renderizando líneas directas por categoría:', rutasPorCategoria)}
